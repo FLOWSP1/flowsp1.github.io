@@ -71,6 +71,19 @@ function sairLocal(msg) {
 /* ---------- utilidades ---------- */
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean); }
+function fon(t) {
+  return String(t || '').replace(/ph/g, 'f').replace(/h/g, '').replace(/y/g, 'i').replace(/k/g, 'c').replace(/w/g, 'v')
+    .replace(/qu/g, 'c').replace(/ss/g, 's').replace(/(.)\1+/g, '$1').replace(/n?g$/, 'n').replace(/[mn]$/, 'n');
+}
+function acharNomes(lst, q) {
+  var k = norm(q).join(' '), tk = norm(q).map(fon);
+  return lst.map(function (p) {
+    var n = norm(p.nome), j = n.join(' '), f = n.map(fon);
+    var nota = j.indexOf(k) >= 0 ? 3 : tk.every(function (t) { return f.some(function (b) { return b.indexOf(t) === 0; }); }) ? 2 :
+      tk.every(function (t) { return f.some(function (b) { return b.indexOf(t) >= 0 || (t.length >= 4 && t.indexOf(b) === 0 && b.length >= 3); }); }) ? 1 : 0;
+    return { p: p, nota: nota };
+  }).filter(function (x) { return x.nota; }).sort(function (a, b) { return b.nota - a.nota || a.p.nome.localeCompare(b.p.nome); }).map(function (x) { return x.p; });
+}
 function lista(s) { return String(s || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
 function dt(iso) { return iso ? new Date(String(iso).slice(0, 10) + 'T12:00:00') : null; }
 function fmtData(iso) { var d = dt(iso); return d && !isNaN(d) ? d.toLocaleDateString('pt-BR') : ''; }
@@ -641,8 +654,11 @@ function mImportPresenca(c) {
       var op = [];
       if (x.pessoa_id) op.push([x.pessoa_id, 'achado: ' + nomeFmt(x.pessoa_nome)]);
       x.sugestoes.forEach(function (s) { op.push([s.id, 'talvez: ' + nomeFmt(s.nome) + (s.zfam ? ' (ZFAM ' + s.zfam + ')' : '')]); });
+      op.push(['__novo', 'não está no cadastro: cadastrar "' + x.nome + '"']);
       return '<tr><td><b>' + esc(x.nome) + '</b><br><span class="kpi-d">' + esc(x.area || 'sem área') + '</span></td><td>' +
-        (x.repetida ? tag('já está nessa lista', 'par') : '<select data-prev="' + x.i + '" aria-label="Cadastro de ' + esc(x.nome) + '">' + opts(op, x.pessoa_id, 'deixar sem ligar') + '</select>') + '</td></tr>';
+        (x.repetida ? tag('já está nessa lista', 'par') : '<select data-prev="' + x.i + '" aria-label="Cadastro de ' + esc(x.nome) + '">' + opts(op, x.pessoa_id, 'deixar sem ligar') + '</select>' +
+          '<input type="search" data-acao="busca-prev" data-i="' + x.i + '" placeholder="' + (x.pessoa_id ? 'não é essa pessoa? buscar outra' : 'buscar no cadastro') + '" autocomplete="off" style="margin-top:6px" aria-label="Buscar o cadastro de ' + esc(x.nome) + '">' +
+          '<div class="list" id="res-prev-' + x.i + '"></div>') + '</td></tr>';
     }).join('') + '</table></div>' +
     '<div class="acoes"><button class="btn" data-acao="prev-voltar">Voltar</button><button class="btn primary" data-acao="presenca-lancar">Lançar presença</button></div></div>';
 }
@@ -1194,7 +1210,7 @@ function resultadosAdd(q, alvo, acao) {
   var c = C(), base = S.r.dados.busca && S.r.dados.busca.length ? S.r.dados.busca : c.pessoas, areaId = S.modal.id, ja = {};
   c.servico.forEach(function (s) { if (s.area_id === areaId) ja[s.pessoa_id] = 1; });
   var k = norm(q).join(' ');
-  var l = k.length < 2 ? [] : base.filter(function (p) { return !ja[p.id] && norm(p.nome).join(' ').indexOf(k) >= 0; }).slice(0, 30);
+  var l = k.length < 2 ? [] : acharNomes(base.filter(function (p) { return !ja[p.id]; }), q).slice(0, 30);
   document.getElementById(alvo || 'res-add').innerHTML = l.map(function (p) {
     return '<div class="item" data-acao="' + (acao || 'add-escolher') + '" data-id="' + p.id + '" data-nome="' + esc(nomeFmt(p.nome)) + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + '</span></div>' +
       '<div class="cs">' + tagApto(c.apto(p)) + '</div><div class="side-r"><span class="btn sm">escolher</span></div></div>';
@@ -1579,6 +1595,16 @@ document.addEventListener('click', function (ev) {
     'importar-presenca': function () { S.importPrev = null; abrirModal('importPresenca', ''); },
     'importar-acomp': function () { S.importPrev = null; abrirModal('importAcomp', ''); },
     'prev-voltar': function () { var t = S.modal.tipo; S.importPrev = null; abrirModal(t, '', true); },
+    'prev-escolher': function () {
+      var i = el.getAttribute('data-i'), sel = document.querySelector('.drawer [data-prev="' + i + '"]');
+      if (!sel) return;
+      if (!sel.querySelector('option[value="' + id + '"]')) {
+        var o = document.createElement('option'); o.value = id; o.textContent = 'escolhido: ' + el.getAttribute('data-nome'); sel.insertBefore(o, sel.options[1] || null);
+      }
+      sel.value = id;
+      document.getElementById('res-prev-' + i).innerHTML = '';
+      var inp = document.querySelector('.drawer [data-acao="busca-prev"][data-i="' + i + '"]'); if (inp) inp.value = '';
+    },
     'presenca-lancar': function () {
       var P = S.importPrev, esc0 = {};
       document.querySelectorAll('.drawer [data-prev]').forEach(function (sel) { esc0[sel.getAttribute('data-prev')] = sel.value; });
@@ -1727,6 +1753,15 @@ document.addEventListener('input', function (ev) {
   if (a === 'busca-wfadd') resultadosAdd(t.value, 'res-wfadd', 'wf-add-escolher');
   if (a === 'busca-pend') resultadosAdd(t.value, 'res-pend', 'pend-ligar');
   if (a === 'busca-wf') resultadosAdd(t.value, 'res-wf', 'wf-ligar-escolher');
+  if (a === 'busca-prev') {
+    var ip = t.getAttribute('data-i'), cp = C(), kp = norm(t.value).join(' ');
+    var achp = kp.length < 2 ? [] : acharNomes(cp.pessoas, t.value).slice(0, 8);
+    document.getElementById('res-prev-' + ip).innerHTML = achp.map(function (p) {
+      return '<div class="item" data-acao="prev-escolher" data-i="' + ip + '" data-id="' + p.id + '" data-nome="' + esc(nomeFmt(p.nome)) + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' +
+        (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + ((cp.serv[p.id] || []).length ? ' · ' + (cp.serv[p.id] || []).map(function (s) { return nomeArea(cp, s.area_id) + ' (' + (ETAPA_NOME[s.etapa] || s.etapa) + ')'; }).join(', ') : '') +
+        '</span></div><div class="side-r"><span class="btn sm">escolher</span></div></div>';
+    }).join('') || (kp.length >= 2 ? '<p class="vazio">Ninguém com esse nome. Escolha "cadastrar" na lista acima.</p>' : '');
+  }
   if (a === 'busca-trainee' && document.getElementById('res-trainee')) resultadosAdd(t.value, 'res-trainee', 'trainee-escolher');
 });
 function dadosForm(f) {
