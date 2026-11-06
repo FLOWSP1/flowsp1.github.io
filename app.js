@@ -548,12 +548,13 @@ function vWf(c) {
   var total = (c.d.wf || []).length, ligados = (c.d.wf || []).filter(function (w) { return w.pessoa_id && c.porId[w.pessoa_id]; }).length;
   var semWf = c.trainees.filter(function (s) { return exigeWF(s) && !wfDe(c, c.porId[s.pessoa_id]).ok; });
   var h = ph('processo', 'Welcome Flow', 'Cada encontro é um evento com a sua lista de presença. Desde ' + fmtData(S.r.wfInicio) + ', só começa o trainee quem foi num deles.',
-    '<button class="btn primary" data-acao="wf-evento-novo">+ novo Welcome Flow</button><button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>');
+    '<button class="btn primary" data-acao="wf-evento-novo">+ novo Welcome Flow</button><button class="btn" data-acao="importar-presenca">Colar lista de presença</button>' +
+    '<button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>');
   h += '<div class="kpis">' + kpi('Encontros', evs.length, '', evs.length ? 'último em ' + fmtData(evs[0].data) : 'nenhum ainda') +
     kpi('Presenças', total, '', 'somando todos os encontros') +
     kpi('Sem cadastro ligado', total - ligados, '', total - ligados ? 'nomes da lista pra ligar' : 'todos ligados', { cls: total - ligados ? 'alerta' : '' }) +
     kpi('Trainees sem Welcome Flow', semWf.length, '', 'no processo novo, sem presença nem confirmação', { cls: semWf.length ? 'alerta' : '' }) + '</div>';
-  if (!evs.length) return h + '<div class="list" style="margin-top:20px"><p class="vazio">Nenhum encontro ainda. Clique em "+ novo Welcome Flow".</p></div>';
+  if (!evs.length) return h + '<div class="list" style="margin-top:20px"><p class="vazio">Nenhum encontro ainda. Clique em "+ novo Welcome Flow", ou em "Colar lista de presença" (o encontro da data escolhida é criado junto).</p></div>';
   h += '<div class="picks" style="margin-top:20px">' + evs.map(function (e) {
     return '<button class="' + (e.data === S.wfData ? 'on' : '') + '" data-acao="wf-evento" data-v="' + e.data + '">' + esc(nomeEvento(e)) + ' <em>' + e.presentes.length + '</em></button>';
   }).join('') + '</div>';
@@ -580,7 +581,17 @@ function vWf(c) {
           opts(areasTeen(c.areas).map(function (a) { return [a.id, 'trainee de ' + a.nome]; }), w.destino_area, 'destino…') + '</select></span></div>' +
         '<div class="side-r" data-stop="1"><button class="btn sm' + (p ? '' : ' primary') + '" data-acao="wf-ligar" data-v="' + w.id + '">' + (p ? 'trocar' : 'ligar') + '</button>' +
         '<button class="btn sm danger" data-acao="wf-tirar" data-v="' + w.id + '">tirar</button></div></div>';
-    }), 'Ninguém na lista ainda. Use "Colar lista" ou "+ pessoa".'));
+    }), 'Ninguém na lista ainda. Use "Colar lista", "Importar acompanhamento" (escolhendo este encontro) ou "+ pessoa".'));
+  var naLista = {};
+  (c.d.wf || []).forEach(function (w) { if (w.pessoa_id) naLista[w.pessoa_id] = 1; });
+  var marcados = c.pessoas.filter(function (p) { return p.wf === 'Sim' && !naLista[p.id]; });
+  if (marcados.length) h += secao('Marcados na ficha, fora de qualquer lista', marcados.length + ' adolescente(s) estão com "foi no Welcome Flow" na ficha (de uma importação ou confirmação), mas não aparecem em nenhuma lista de presença. ' +
+      'Se foram neste encontro, ponha todos na lista de uma vez.',
+    '<div class="acoes" style="margin-bottom:10px"><button class="btn primary" data-acao="wf-marcados">Pôr os ' + marcados.length + ' na lista de ' + fmtData(ev.data) + '</button></div>' +
+    listaOuVazio(marcados.map(function (p) {
+      return '<div class="item" data-acao="pessoa" data-id="' + p.id + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + '</span></div>' +
+        '<div class="cs">' + (c.serv[p.id] || []).map(function (s) { return tag(nomeArea(c, s.area_id), 'line') + tagEtapa(s); }).join('') + '</div></div>';
+    }), ''));
   if (semWf.length) h += secao('Trainees sem Welcome Flow confirmado', 'Entraram no processo depois de ' + fmtData(S.r.wfInicio) + '. Ponha na lista do encontro em que estiveram, ou confirme na ficha.',
     listaOuVazio(semWf.map(function (s) { return linhaTrainee(c, s); }), ''));
   return h;
@@ -643,7 +654,10 @@ function mImportAcomp(c) {
     return h + '<p class="kpi-d" style="margin-bottom:12px">Cole qualquer lista de pessoas: <b>uma por linha</b>, ou <b>numeradas</b> (1., 2., 3.), ou uma por parágrafo. ' +
       'Basta o <b>nome</b>. Se tiver telefone, "Nome - Área", "Área final:" ou a resposta do contato, o painel aproveita. ' +
       'Quem não cruzar com nenhum cadastro fica <b>pendente</b> pra vocês confirmarem depois. Nada é gravado antes de você conferir.</p>' +
-      '<form data-form="prev-acomp"><label class="field">Texto<textarea name="texto" rows="16" placeholder="1. Fulano da Silva - Recepção&#10;foi no Welcome Flow, vai fazer o trainee sábado&#10;&#10;2. Beltrana Souza&#10;já concluiu o trainee" required></textarea></label>' +
+      '<form data-form="prev-acomp"><div class="form" style="margin-bottom:12px"><label class="field">Essas pessoas estiveram num Welcome Flow?<select name="wf">' +
+        opts(eventosWf(c).map(function (e) { return [e.data, 'Sim: lista de ' + nomeEvento(e)]; }), S.tab === 'wf' ? S.wfData : '', 'Não pôr em lista de presença') + '</select></label>' +
+        '<label class="field">Ou outro encontro (data)<input type="date" name="wfNova"><small>cria o encontro dessa data</small></label></div>' +
+      '<label class="field">Texto<textarea name="texto" rows="16" placeholder="1. Fulano da Silva - Recepção&#10;foi no Welcome Flow, vai fazer o trainee sábado&#10;&#10;2. Beltrana Souza&#10;já concluiu o trainee" required></textarea></label>' +
       '<div class="acoes"><button class="btn primary" type="submit">Ver prévia</button></div></form></div>';
   }
   var areas = areasTeen(c.areas).map(function (a) { return [a.id, a.nome]; });
@@ -651,6 +665,8 @@ function mImportAcomp(c) {
   var achados = P.previa.filter(function (x) { return x.pessoa_id; }).length;
   return h + '<p class="kpi-d" style="margin-bottom:12px"><b>' + achados + ' de ' + P.previa.length + '</b> cruzaram com um cadastro. Os outros ficam como <b>pendente</b> ' +
     '(a não ser que você escolha a pessoa certa ou "cadastrar como novo"). A etapa e o Welcome Flow foram lidos do texto; mude o que precisar. A etapa só avança.</p>' +
+    (P.dataWf ? '<div class="nota certo" style="margin-bottom:12px">Todo mundo marcado com "foi no Welcome Flow" entra na <b>lista de presença de ' + fmtData(P.dataWf) + '</b>, ligado ao cadastro quando cruzou. ' +
+      'Os pendentes entram na lista sem cadastro ligado e se ligam sozinhos quando você resolver o pendente. Desmarque quem não foi.</div>' : '') +
     P.previa.map(function (x) {
       var op = [];
       if (x.pessoa_id) op.push([x.pessoa_id, 'achado: ' + nomeFmt(x.pessoa_nome)]);
@@ -1577,7 +1593,7 @@ document.addEventListener('click', function (ev) {
         esc0[box.getAttribute('data-acomp')] = { pessoa_id: v('pessoa_id'), area_id: v('area_id'), etapa: v('etapa'), wf: v('wf') ? 'Sim' : '', pular: v('pular') };
       });
       el.disabled = true;
-      api('importarAcompanhamento', P.texto, true, esc0).then(function (r) { S.importPrev = null; fecharModal(); aplicar(r); toast(r.msg); })
+      api('importarAcompanhamento', P.texto, true, esc0, P.dataWf || '').then(function (r) { S.importPrev = null; if (r.wfData) S.wfData = r.wfData; fecharModal(); aplicar(r); toast(r.msg); })
         .catch(function (e) { el.disabled = false; falha(e); });
     },
     'wf-ligar': function () { abrirModal('wfLigar', v); },
@@ -1585,6 +1601,11 @@ document.addEventListener('click', function (ev) {
     'wf-evento-novo': function () { abrirModal('wfEvento', ''); },
     'wf-evento-editar': function () { abrirModal('wfEvento', S.wfData); },
     'wf-add': function () { abrirModal('wfAdd', S.wfData); },
+    'wf-marcados': function () {
+      if (!confirm('Pôr na lista de ' + fmtData(S.wfData) + ' todos que estão marcados como "foi no Welcome Flow" e não estão em nenhuma lista?')) return;
+      el.disabled = true;
+      api('adicionarMarcadosWF', S.wfData).then(function (r) { aplicar(r); toast(r.msg); }).catch(function (e) { el.disabled = false; falha(e); });
+    },
     'wf-checkin': function () { abrirModal('wfCheckin', S.wfData); },
     'copiar-link-wf': function () { copiar(v, 'Link do check-in copiado'); },
     'wf-add-escolher': function () { api('adicionarPresencaWF', S.modal.id, id).then(function (r) { aplicar(r); toast('Posto na lista'); abrirModal('wfAdd', S.modal.id); }).catch(falha); },
@@ -1761,8 +1782,9 @@ document.addEventListener('submit', function (ev) {
   if (tipo === 'prev-presenca' || tipo === 'prev-acomp') {
     travar();
     var pres = tipo === 'prev-presenca';
-    (pres ? api('registrarPresencaWF', o.data, o.texto, false) : api('importarAcompanhamento', o.texto, false)).then(function (r) {
-      S.importPrev = { tipo: pres ? 'presenca' : 'acomp', data: o.data, texto: o.texto, previa: r.previa };
+    var dataWf = pres ? '' : (o.wfNova || o.wf || '');
+    (pres ? api('registrarPresencaWF', o.data, o.texto, false) : api('importarAcompanhamento', o.texto, false, null, dataWf)).then(function (r) {
+      S.importPrev = { tipo: pres ? 'presenca' : 'acomp', data: o.data, texto: o.texto, previa: r.previa, dataWf: dataWf };
       abrirModal(pres ? 'importPresenca' : 'importAcomp', '', true);
     }).catch(soltar);
   }
