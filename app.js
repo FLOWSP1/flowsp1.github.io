@@ -1728,7 +1728,9 @@ function telaCadastroFeito(r) {
       'Só cadastro': ['Cadastro feito', 'Seus dados entraram na CREW FLOW. Obrigado por servir com a gente!']
     }[r.status] || ['Cadastro feito', ''];
     titulo = T[0]; texto = T[1];
-    corpo = r.status === 'Só cadastro' ? '' : '<a class="btn primary" href="' + urlSite() + '">Ir pro painel</a>';
+    corpo = (r.emailFalhou ? '<div class="nota alerta" style="margin-bottom:14px">Seu cadastro foi salvo, mas o e-mail de confirmação não saiu agora. ' +
+      'Daqui a pouco, entre no painel em "Primeiro acesso ou esqueci a senha" pra receber o código, ou peça ao RH das AEs o seu código de acesso.</div>' : '') +
+      (r.status === 'Só cadastro' ? '' : '<a class="btn primary" href="' + urlSite() + '">Ir pro painel</a>');
   }
   document.getElementById('app').innerHTML = paginaAberta(titulo, texto, corpo, 'CREW FLOW');
   window.scrollTo(0, 0);
