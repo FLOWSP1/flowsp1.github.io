@@ -716,12 +716,14 @@ function linhaInscricao(c, i) {
   return '<div class="item" data-acao="inscricao" data-id="' + i.id + '"><div class="nm"><b>' + esc(nomeFmt(i.nome)) + '</b><span>' + (anos !== null ? anos + ' anos · ' : '') +
     'inscrição em ' + fmtData(i.data) + (i.tempo_flow ? ' · ' + esc(i.tempo_flow) : '') + '</span></div><div class="cs">' + tag(i.status, cls) +
     (serve ? tag('já serve: ' + serve, 'vol') : apt) + (i.area_interesse ? tag(i.area_interesse, 'line') : '') +
-    (i.ministerio && i.ministerio !== 'Áreas Executivas' ? tag(i.ministerio, 'line') : '') + (i.lider_zfam ? tag('ZFAM ' + i.lider_zfam, 'line') : '') + '</div>' +
+    (i.ministerio && i.ministerio !== 'Áreas Executivas' ? tag('quer: ' + i.ministerio, 'line') : '') + (i.lider_zfam ? tag('ZFAM ' + i.lider_zfam, 'line') : '') + '</div>' +
     '<div class="side-r">' + (i.whatsapp ? '<a class="tel" href="' + wa(i.whatsapp) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '') + '</div></div>';
 }
+/** Inscrição pras Áreas Executivas? (a área agora é resposta curta: só fica de fora quem citou outro ministério) */
+function ehAE(i) { return i.ministerio === 'Áreas Executivas' || !!i.area_interesse || !/interce|alcance|fbs|louvor|m[ií]dia/i.test(String(i.ministerio || '')); }
 function vInscricoes(c) {
   var todas = (c.d.inscricoes || []).slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
-  var base = todas.filter(function (i) { return !S.soAE || i.ministerio === 'Áreas Executivas' || i.area_interesse; });
+  var base = todas.filter(function (i) { return !S.soAE || ehAE(i); });
   var lst = base.filter(function (i) { return S.filtroInsc === 'todas' || i.status === S.filtroInsc; });
   var h = ph('quem quer servir', 'Inscrições', 'Do formulário do site. Abra uma inscrição pra mudar o status ou encaminhar pro Welcome Flow de uma área.',
     '<button class="btn" data-acao="link-form">Copiar link do formulário</button><button class="btn" data-acao="perguntas" data-v="inscricao">Editar perguntas</button>');
@@ -1098,7 +1100,7 @@ function mInscricao(c, id) {
   var i = (c.d.inscricoes || []).filter(function (x) { return x.id === id; })[0];
   if (!i) return cab('inscrição', 'Não encontrada') + '<div class="drawer-b"></div>';
   var campos = [['Data da inscrição', fmtData(i.data)], ['Nascimento', fmtData(i.nascimento)], ['Tempo de Flow', i.tempo_flow], ['Está em ZFAM', i.em_zfam],
-                ['Líder de ZFAM', i.lider_zfam], ['Ministério', i.ministerio], ['Área de interesse', i.area_interesse], ['E-mail', i.email], ['WhatsApp', i.whatsapp]].concat(extrasDe(i.respostas));
+                ['Líder de ZFAM', i.lider_zfam], ['Área que gostaria de servir', i.ministerio], ['Área reconhecida', i.area_interesse], ['E-mail', i.email], ['WhatsApp', i.whatsapp]].concat(extrasDe(i.respostas));
   var h = cab('inscrição', esc(nomeFmt(i.nome)), tag(i.status, { 'Nova': 'warn', 'Encaminhada': 'ok' }[i.status] || 'line')) + '<div class="drawer-b"><div class="bloco">' + info(campos) +
     (i.obs && !gestao() ? '<div class="nota" style="margin-top:12px">' + esc(i.obs) + '</div>' : '') + '</div>';
   if (!gestao()) return h + '</div>';
@@ -1695,10 +1697,10 @@ function campoPergunta(q, F) {
   return '<label class="field' + (largo ? ' full' : '') + '">' + rot + ajuda + campo + '</label>';
 }
 function telaInscricao(F) {
-  return paginaAberta('Quero servir no Flow', 'Preencha pra entrar no processo de voluntários. Pra servir, você precisa estar num ZFAM e ter pelo menos 6 meses de Flow. ' +
+  return paginaAberta('Voluntários Flow', 'Preencha pra entrar no processo de voluntários. Pra servir, você precisa estar num ZFAM e ter pelo menos 6 meses de Flow. ' +
     'O caminho é: Welcome Flow (presencial) → 2 dias de trainee → voluntário.',
     '<form data-form="inscrever" class="card form">' + F.perguntas.map(function (q) { return campoPergunta(q, F); }).join('') +
-    '<div class="acoes full"><button class="btn primary" type="submit">Enviar inscrição</button></div></form>', 'Áreas Executivas');
+    '<div class="acoes full"><button class="btn primary" type="submit">Enviar inscrição</button></div></form>', 'Flow');
 }
 function iniciarCadastro() {
   api('formularioPublico', 'cadastro').then(function (F) {
