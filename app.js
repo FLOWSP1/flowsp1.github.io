@@ -1032,8 +1032,8 @@ var COR_PEDIDO = { 'Pendente': 'warn', 'Aprovado': 'ok', 'Aprovado (automático)
 function crewPedidos(c) {
   var todos = (c.d.cadastros || []).slice().sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
   var lst = S.filtroPedidos === 'todos' ? todos : todos.filter(function (x) { return x.status === 'Pendente'; });
-  var h = '<p class="sub" style="color:var(--muted);margin-bottom:12px;max-width:760px">Quem se cadastrou pelo site. Líder ou auxiliar com o mesmo e-mail do Tally e o nome igual ao da planilha é liberado sozinho. ' +
-    'O resto espera aqui. Ao aprovar, a pessoa recebe um e-mail e entra com o e-mail e a senha dela.</p>' +
+  var h = '<p class="sub" style="color:var(--muted);margin-bottom:12px;max-width:760px">Quem se cadastrou pelo site ou confirmou o e-mail em "Primeiro acesso" sem ter acesso. ' +
+    'Ninguém é liberado sozinho: todo pedido espera aqui a aprovação de um Head ou do Core. Ao aprovar, a pessoa recebe um e-mail e entra com o e-mail e a senha dela.</p>' +
     '<div class="filtros"><div class="seg">' + [['Pendente', 'Esperando você'], ['todos', 'Todos']].map(function (f) {
       var n = f[0] === 'todos' ? todos.length : todos.filter(function (x) { return x.status === 'Pendente'; }).length;
       return '<button class="' + (S.filtroPedidos === f[0] ? 'on' : '') + '" data-acao="filtro-pedidos" data-v="' + f[0] + '">' + f[1] + ' <em>' + n + '</em></button>';
@@ -1052,12 +1052,17 @@ function crewAcessos(c) {
   var ac = (c.d.acessos || []).slice().sort(function (a, b) {
     return (a.criado_por === 'teste' ? -1 : 0) - (b.criado_por === 'teste' ? -1 : 0) || (ordem[a.perfil] === undefined ? 2 : ordem[a.perfil]) - (ordem[b.perfil] === undefined ? 2 : ordem[b.perfil]) || a.nome.localeCompare(b.nome);
   });
-  var h = '<div class="filtros"><button class="btn primary" data-acao="acesso-novo">+ criar acesso</button><span class="sub" style="color:var(--muted);font-size:13px">"Ver como" abre o painel do jeito que a pessoa vê. Quem é Head não vê o código de quem é Core.</span></div>';
-  return h + '<div class="tbl-wrap"><table class="tbl"><tr><th>Nome</th><th>Perfil</th><th>O que vê</th><th>E-mail</th><th>Código</th><th></th></tr>' + ac.map(function (a) {
+  var eu0 = S.r.usuario.nome;
+  var nunca = ac.filter(function (a) { return a.codigo && a.email && !a.aviso_em && a.criado_por !== 'teste' && a.nome !== eu0; }).length;
+  var h = '<div class="filtros"><button class="btn primary" data-acao="acesso-novo">+ criar acesso</button>' +
+    (nunca ? '<button class="btn" data-acao="avisar-todos" data-v="' + nunca + '">Mandar o e-mail de acesso pra quem nunca recebeu (' + nunca + ')</button>' : '') +
+    '<span class="sub" style="color:var(--muted);font-size:13px">"Ver como" abre o painel do jeito que a pessoa vê. Quem é Head não vê o código de quem é Core.</span></div>';
+  return h + '<div class="tbl-wrap"><table class="tbl"><tr><th>Nome</th><th>Perfil</th><th>O que vê</th><th>E-mail</th><th>Aviso por e-mail</th><th>Código</th><th></th></tr>' + ac.map(function (a) {
     var es = escopoDe(a), lider = PERFIL[a.perfil] === 'Liderança', eu = S.r.usuario.nome === a.nome && a.codigo;
     return '<tr><td><b>' + esc(a.nome) + '</b>' + (a.criado_por === 'teste' ? ' ' + tag('teste', 'warn') : '') + '</td>' +
       '<td>' + esc(PERFIL[a.perfil] || a.perfil) + '</td><td>' + (lider ? esc(escopoTexto(c, es.areas, es.zfams)) || tag('nada', 'bad') : 'tudo') + '</td>' +
-      '<td>' + (esc(a.email) || '<span style="color:var(--muted)">—</span>') + '</td>' +
+      '<td>' + (esc(a.email) || tag('sem e-mail', 'bad')) + '</td>' +
+      '<td>' + (a.aviso_em ? '<span style="color:var(--muted)">' + fmtDataHora(a.aviso_em) + '</span>' : a.email ? tag('nunca recebeu', 'warn') : '<span style="color:var(--muted)">—</span>') + '</td>' +
       '<td>' + (a.codigo ? '<button class="btn sm" data-acao="ver-codigo" data-v="' + esc(a.codigo) + '">mostrar</button>' : '<span style="color:var(--muted)">só Core vê</span>') + '</td>' +
       '<td><div class="acts">' + (a.codigo && !eu && !S.voltar ? '<button class="btn sm" data-acao="ver-como" data-v="' + esc(a.codigo) + '">ver como</button>' : '') +
       (a.codigo && a.telefone ? '<a class="btn sm" href="' + esc(waMsg(a.telefone, mensagemAcesso(a))) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '') +
@@ -1528,7 +1533,17 @@ document.addEventListener('click', function (ev) {
     },
     acesso: function () { S.prefAcesso = null; abrirModal('acesso', v); },
     'ver-codigo': function () { el.outerHTML = '<code class="cod">' + esc(v) + '</code>'; },
-    'acesso-reenviar': function () { api('reenviarCodigo', v).then(function (r) { toast('Aviso reenviado pra ' + r.email); }).catch(falha); },
+    'acesso-reenviar': function () { api('reenviarCodigo', v).then(function (r) { toast('Aviso reenviado pra ' + r.email); S.r.dados.acessos.forEach(function (a) { if (a.codigo === v) a.aviso_em = agoraLocal(); }); render(); }).catch(falha); },
+    'avisar-todos': function () {
+      if (!confirm('Mandar o e-mail de acesso pra ' + v + ' pessoa(s) que ainda não receberam? Cada uma recebe o link do painel e o código pessoal.')) return;
+      el.disabled = true;
+      api('avisarTodos').then(function (r) {
+        var a = r.avisos || {};
+        aplicar(r);
+        toast(a.enviados + ' e-mail(s) enviados' + (a.falhas && a.falhas.length ? '. Não saiu pra: ' + a.falhas.join(', ') : '') +
+          (a.faltam ? '. Faltam ' + a.faltam + ': clique de novo (o Google limita os e-mails por dia).' : '.'), !!(a.falhas && a.falhas.length));
+      }).catch(falha);
+    },
     'acesso-apagar': function () {
       if (confirm('Apagar este acesso? A pessoa não entra mais no painel.')) api('removerAcesso', v).then(function (r) { fecharModal(); aplicar(r); toast('Acesso apagado'); }).catch(falha);
     },
@@ -1727,7 +1742,7 @@ document.addEventListener('submit', function (ev) {
       if (r.token) { if (PAGINA !== 'painel') { history.replaceState(null, '', urlSite()); PAGINA = 'painel'; } entrou(r); return; }
       if (tipo === 'confirmar-cadastro') { S.cadastroFeito.confirmado = true; telaCadastroFeito(S.cadastroFeito); return; }
       S.login = 'senha';
-      S.loginMsg = 'Senha criada. O seu acesso ao painel ainda não foi liberado pelo RH das AEs: você recebe um e-mail quando for.';
+      S.loginMsg = 'Senha criada. O seu pedido de acesso foi pro RH das AEs, que confere e libera. Você recebe um e-mail quando for liberado.';
       render();
     }).catch(soltar);
   }
@@ -1889,3 +1904,4 @@ function telaCadastroFeito(r) {
   render();
   api('sessao').then(aplicar).catch(function (e) { if (!S.r) { S.token = ''; guardar('aes-token', null); render(); } falha(e); });
 })();
+function agoraLocal() { var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
