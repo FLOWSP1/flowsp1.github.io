@@ -6,7 +6,7 @@ var PAGINA = PARAMS.get('pagina') || 'painel';
 var ETAPA_NOME = { 'Onboard': 'Esperando dia 1', 'Trainee 1': 'Trainee · dia 1', 'Trainee 2': 'Trainee · dia 2', 'Voluntário': 'Voluntário' };
 var PERFIL = { core: 'Core', head: 'Head', lider: 'Liderança', lider_area: 'Liderança', lider_zfam: 'Liderança' };
 var SEM_AREA = '__sem', A_CONFIRMAR = '__confirmar';
-var ABERTAS = ['formularioPublico', 'inscrever', 'cadastrarCrew', 'entrarComCodigo', 'entrarComSenha', 'pedirCodigoEmail', 'confirmarCodigoEmail'];
+var ABERTAS = ['formularioPublico', 'formularioWF', 'checkinWF', 'inscrever', 'cadastrarCrew', 'entrarComCodigo', 'entrarComSenha', 'pedirCodigoEmail', 'confirmarCodigoEmail'];
 
 /* ---------- armazenamento local (só conveniência; tudo tem plano B) ---------- */
 function guardar(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { } }
@@ -567,14 +567,17 @@ function vWf(c) {
     '<dt>Presentes</dt><dd>' + ws.length + (falta ? ' · <span class="falta">' + falta + ' sem cadastro ligado</span>' : '') + '</dd>' +
     (ev.obs ? '<dt>Obs.</dt><dd>' + esc(ev.obs) + '</dd>' : '') + '</dl></div>' +
     '<div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-acao="wf-evento-editar">Editar</button>' +
-    '<button class="btn" data-acao="importar-presenca">Colar lista</button><button class="btn primary" data-acao="wf-add">+ pessoa</button></div></div>';
+    '<button class="btn" data-acao="wf-checkin">Check-in (link e QR)</button><button class="btn" data-acao="importar-presenca">Colar lista</button><button class="btn primary" data-acao="wf-add">+ pessoa</button></div></div>';
   h += secao('Lista de presença', 'Clique no nome pra abrir a ficha. "Ligar" junta o nome da lista ao cadastro certo (ex.: apelido ou outro sobrenome).',
     listaOuVazio(ws.map(function (w) {
       var p = w.pessoa_id && c.porId[w.pessoa_id];
       var onde = p ? (c.serv[p.id] || []).map(function (s) { return tag(nomeArea(c, s.area_id), 'line') + tagEtapa(s); }).join('') : '';
       return '<div class="item"' + (p ? ' data-acao="pessoa" data-id="' + p.id + '"' : '') + '><div class="nm"><b>' + esc(p ? nomeFmt(p.nome) : w.nome) + '</b><span>' +
         (p && norm(p.nome).join(' ') !== norm(w.nome).join(' ') ? 'na lista: ' + esc(w.nome) + ' · ' : '') + (w.area_texto ? esc(w.area_texto) : (p ? (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') : '')) + '</span></div>' +
-        '<div class="cs">' + (p ? tag('cadastro ligado', 'ok') + onde : tag('sem cadastro ligado', 'warn')) + '</div>' +
+        '<div class="cs">' + (w.area_desejada ? tag('quer: ' + w.area_desejada, 'line') : '') + (w.origem === 'check-in' ? tag('check-in', 'line') : '') +
+          (p ? tag('cadastro ligado', 'ok') + onde : tag('sem cadastro ligado', 'warn')) +
+          '<span data-stop="1"><select data-acao="wf-destino" data-v="' + w.id + '" aria-label="Destino">' +
+          opts(areasTeen(c.areas).map(function (a) { return [a.id, 'trainee de ' + a.nome]; }), w.destino_area, 'destino…') + '</select></span></div>' +
         '<div class="side-r" data-stop="1"><button class="btn sm' + (p ? '' : ' primary') + '" data-acao="wf-ligar" data-v="' + w.id + '">' + (p ? 'trocar' : 'ligar') + '</button>' +
         '<button class="btn sm danger" data-acao="wf-tirar" data-v="' + w.id + '">tirar</button></div></div>';
     }), 'Ninguém na lista ainda. Use "Colar lista" ou "+ pessoa".'));
@@ -680,6 +683,45 @@ function mPendente(c, id) {
     '<label class="field">Buscar outro nome<input type="search" data-acao="busca-pend" autocomplete="off"></label><div class="list" id="res-pend" style="margin-top:10px"><p class="vazio">Digite pelo menos 2 letras.</p></div>' +
     '<div class="acoes"><button class="btn danger" data-acao="pend-descartar">Descartar</button><button class="btn" data-acao="pend-novo">Não está no cadastro: cadastrar "' + esc(x.nome) + '"</button></div></div>';
 }
+/* ---------- check-in do Welcome Flow (página aberta) ---------- */
+function telaCheckin(F) {
+  var titulo = F.nome || 'Welcome Flow';
+  if (!F.aberto) return paginaAberta(titulo, 'O check-in do encontro de ' + fmtData(F.data) + ' está fechado. Fale com alguém da equipe.', '', 'Check-in');
+  return paginaAberta(titulo, 'Que bom ter você aqui! Faça o seu check-in do encontro de ' + fmtData(F.data) + '.',
+    '<form data-form="checkin" class="card form"><input type="hidden" name="data" value="' + esc(F.data) + '">' +
+    '<label class="field full">Nome completo *<input type="text" name="nome" autocomplete="name" required></label>' +
+    '<label class="field">WhatsApp *<input type="tel" name="telefone" placeholder="(11) 90000-0000" autocomplete="tel" required></label>' +
+    '<label class="field">Data de nascimento<input type="date" name="nascimento"></label>' +
+    '<label class="field full">E-mail<input type="email" name="email" autocomplete="email"></label>' +
+    '<label class="field full">Seu ZFAM (nome do líder)<select name="zfam" data-outro="1">' + opts(F.zfams, '', 'Não faço parte / não sei') +
+      '<option value="__outro">Outro / não está na lista</option></select><input type="text" name="zfam__outro" placeholder="Nome do líder do seu ZFAM" hidden disabled></label>' +
+    '<label class="field full">Qual área você gostaria de servir?<input type="text" name="area" placeholder="ex.: Recepção, Fotografia, Apoio…">' +
+      '<small>É a área que você gostaria, mas a gente vai realocar de acordo com a necessidade e te avisa.</small></label>' +
+    '<div class="acoes full"><button class="btn primary" type="submit">Fazer check-in</button></div></form>', 'Check-in · Welcome Flow');
+}
+/** Gaveta da gestão: link e QR code do check-in de um encontro. */
+function mWfCheckin(c, data) {
+  var url = urlSite() + '?pagina=wf&data=' + data;
+  setTimeout(function () { desenharQR(url); }, 30);
+  return cab('check-in · ' + fmtData(data), 'Link do check-in') + '<div class="drawer-b">' +
+    '<p class="kpi-d" style="margin-bottom:12px">Mostre o QR code na tela no dia do encontro, ou mande o link no grupo. Quem responder entra na lista de presença com a área que gostaria; ' +
+    'o destino (trainee de qual área) vocês escolhem na lista. Fica aberto do dia anterior até 3 dias depois do encontro.</p>' +
+    '<div id="qr" style="display:flex;justify-content:center;padding:16px;background:#fff;border:1px solid var(--line);border-radius:10px;min-height:260px;align-items:center"><span class="kpi-d">Gerando o QR code…</span></div>' +
+    '<div class="field" style="margin-top:14px">Link<input type="text" readonly value="' + esc(url) + '"></div>' +
+    '<div class="acoes"><button class="btn" data-acao="copiar-link-wf" data-v="' + esc(url) + '">Copiar link</button><a class="btn primary" href="' + esc(url) + '" target="_blank" rel="noopener">Abrir o formulário</a></div></div>';
+}
+function desenharQR(url) {
+  var box = document.getElementById('qr');
+  if (!box) return;
+  var desenha = function () { box.innerHTML = ''; new window.QRCode(box, { text: url, width: 240, height: 240, colorDark: '#141B33', colorLight: '#ffffff' }); };
+  if (window.QRCode) return desenha();
+  var sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+  sc.onload = desenha;
+  sc.onerror = function () { box.innerHTML = '<span class="kpi-d">Não deu pra gerar o QR code agora. Use o link.</span>'; };
+  document.head.appendChild(sc);
+}
+
 /* ---------- área só da CREW (Check-in): adultos, sem trainee ---------- */
 function vAreaCrew(c, a) {
   var eq = gestao() ? (c.d.equipe || []) : (c.d.equipeArea || []);
@@ -1035,7 +1077,7 @@ function mensagemAcesso(a) {
 function abrirModal(tipo, id, refresh) {
   S.modal = { tipo: tipo, id: id };
   var c = C(), html = { pessoa: mPessoa, inscricao: mInscricao, area: mArea, meta: mMeta, zfam: mZfam, adulto: mAdulto, addArea: mAddArea, trainee: mTrainee,
-                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar, pendente: mPendente, wfEvento: mWfEvento, wfAdd: mWfAdd,
+                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar, pendente: mPendente, wfEvento: mWfEvento, wfAdd: mWfAdd, wfCheckin: mWfCheckin,
                         importPresenca: mImportPresenca, importAcomp: mImportAcomp }[tipo](c, id);
   var m = document.getElementById('drawer');
   var gaveta = m.querySelector('.drawer'), rol = refresh && gaveta ? gaveta.scrollTop : 0;
@@ -1528,6 +1570,8 @@ document.addEventListener('click', function (ev) {
     'wf-evento-novo': function () { abrirModal('wfEvento', ''); },
     'wf-evento-editar': function () { abrirModal('wfEvento', S.wfData); },
     'wf-add': function () { abrirModal('wfAdd', S.wfData); },
+    'wf-checkin': function () { abrirModal('wfCheckin', S.wfData); },
+    'copiar-link-wf': function () { copiar(v, 'Link do check-in copiado'); },
     'wf-add-escolher': function () { api('adicionarPresencaWF', S.modal.id, id).then(function (r) { aplicar(r); toast('Posto na lista'); abrirModal('wfAdd', S.modal.id); }).catch(falha); },
     pendente: function () { abrirModal('pendente', id); },
     'pend-ligar': function () { api('resolverPendente', S.modal.id, id).then(function (r) { fecharModal(); aplicar(r); toast('Ligado ao cadastro'); }).catch(falha); },
@@ -1611,6 +1655,10 @@ document.addEventListener('change', function (ev) {
   }
   if (a === 'so-ae') { S.soAE = el.checked; render(); }
   if (a === 'tr-area') { S.trArea = el.value; render(); }
+  if (a === 'wf-destino') {
+    api('destinarPresencaWF', el.getAttribute('data-v'), el.value).then(function (r) { aplicar(r); toast(el.value ? 'Agora é trainee (esperando o dia 1)' : 'Destino tirado'); })
+      .catch(function (e) { render(); falha(e); });
+  }
   if (a === 'filtro-equipe') { S.filtroEquipe = el.value; render(); }
   if (a === 'ordem-equipe') { S.ordemEquipe = el.value; render(); }
   if (a === 'ordem-pessoas') { S.ordemPessoas = el.value; render(); }
@@ -1701,6 +1749,13 @@ document.addEventListener('submit', function (ev) {
     (pres ? api('registrarPresencaWF', o.data, o.texto, false) : api('importarAcompanhamento', o.texto, false)).then(function (r) {
       S.importPrev = { tipo: pres ? 'presenca' : 'acomp', data: o.data, texto: o.texto, previa: r.previa };
       abrirModal(pres ? 'importPresenca' : 'importAcomp', '', true);
+    }).catch(soltar);
+  }
+  if (tipo === 'checkin') {
+    juntarOutros(o); travar();
+    api('checkinWF', o).then(function (r) {
+      document.getElementById('app').innerHTML = paginaAberta('Check-in feito!', 'Seja bem-vindo ao ' + esc(r.nome || 'Welcome Flow') + '. Depois do encontro a gente te avisa a área e o seu primeiro dia de trainee.', '', 'Check-in');
+      window.scrollTo(0, 0);
     }).catch(soltar);
   }
   if (tipo === 'wf-evento') api('salvarEventoWF', o).then(function (r) { S.wfData = o.data; fecharModal(); aplicar(r); toast(r.msg); }).catch(falha);
@@ -1821,6 +1876,11 @@ function telaCadastroFeito(r) {
     return;
   }
   if (PAGINA === 'cadastro') { iniciarCadastro(); return; }
+  if (PAGINA === 'wf') {
+    api('formularioWF', PARAMS.get('data') || '').then(function (F) { document.getElementById('app').innerHTML = telaCheckin(F); })
+      .catch(function (e) { document.getElementById('app').innerHTML = paginaAberta('Check-in', esc(e.message)); });
+    return;
+  }
   PAGINA = 'painel';
   if (!S.token) { render(); return; }
   // abre na hora com o que já estava nesta aba, e atualiza em seguida
