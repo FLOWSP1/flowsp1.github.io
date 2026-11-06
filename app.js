@@ -307,7 +307,7 @@ function vGeral(c) {
   var novas = (c.d.inscricoes || []).filter(function (i) { return i.status === 'Nova' && (i.ministerio === 'Áreas Executivas' || i.area_interesse) && !jaServe(c, i); });
 
   var h = ph('visão geral', 'Como estão as Áreas Executivas', 'Dados de ' + fmtData(S.r.hoje) + '. Clique numa barra ou num número pra abrir.',
-    '<button class="btn" data-acao="sync">Atualizar com as planilhas antigas</button>' + (S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Inboard</button>' : ''));
+    '<button class="btn" data-acao="sync">Atualizar com as planilhas antigas</button>' + (S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : ''));
   h += '<div class="kpis">' +
     kpi('Voluntários servindo', servindo.length, '', idealTotal ? pct(volComIdeal, idealTotal) + '% do ideal preenchido (' + volComIdeal + ' de ' + idealTotal + ')' : 'ideal das áreas a definir') +
     kpi('Em formação', c.trainees.length, '', 'Welcome Flow e trainees', { acao: 'tab', v: 'trainees' }) +
@@ -491,7 +491,7 @@ function linhaTrainee(c, s, semArea) {
   var p = c.porId[s.pessoa_id], pp = proximoPasso(c, s), i = c.idade(p), ap = c.apto(p);
   var datas = [s.welcome ? 'WF ' + fmtCurta(s.welcome) : '', s.dia1 ? 'dia 1 ' + fmtCurta(s.dia1) : '', s.dia2 ? 'dia 2 ' + fmtCurta(s.dia2) : ''].filter(Boolean).join(' · ');
   var tags = tagEtapa(s) + (semArea ? '' : tag(nomeArea(c, s.area_id), s.area_id ? 'line' : 'warn')) + (s.horario ? tag(s.horario, 'line', 'horário em que serve') : tag('horário ?', 'par', 'horário a definir')) +
-    (ap.ok || ap.idade ? '' : tagApto(ap)) + (s.origem === 'inboard' ? tag('Inboard', 'line', 'veio do formulário Inboard') : '');
+    (ap.ok || ap.idade ? '' : tagApto(ap)) + (s.origem === 'inboard' ? tag('Onboard', 'line', 'veio do formulário Onboard') : '');
   var botao = s.etapa === 'Trainee 2' && podeArea(s.area_id) && s.area_id ? '<button class="btn sm accent" data-acao="virar-voluntario" data-v="' + s.id + '">Virar voluntário</button>' :
     s.etapa !== 'Trainee 2' && podeArea(s.area_id) && s.area_id ? '<button class="btn sm" data-acao="avancar" data-v="' + s.id + '">' + (s.etapa === 'Onboard' ? 'Fez o dia 1' : 'Fez o dia 2') + '</button>' : '';
   var tel = p.telefone ? '<a class="tel" href="' + wa(p.telefone) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '';
@@ -509,7 +509,7 @@ function vTrainees(c) {
   var lst = base.filter(function (s) { return (S.trEtapa === 'todas' || s.etapa === S.trEtapa) && (!S.trArea || s.area_id === S.trArea || (S.trArea === SEM_AREA && !s.area_id)); })
     .sort(function (a, b) { return S.r.etapas.indexOf(b.etapa) - S.r.etapas.indexOf(a.etapa) || (c.porId[a.pessoa_id].nome || '').localeCompare(c.porId[b.pessoa_id].nome || ''); });
   var h = ph('trainees', 'Trainees', 'Quem fez o Welcome Flow e está nos 2 dias de trainee. Depois do 2º dia, a pessoa pode começar como voluntária: fale com o líder da área e clique em "Virar voluntário".',
-    (areasVis.length ? '<button class="btn primary" data-acao="trainee-novo" data-v="">+ trainee</button>' : '') + (gestao() && S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Inboard</button>' : ''));
+    (areasVis.length ? '<button class="btn primary" data-acao="trainee-novo" data-v="">+ trainee</button>' : '') + (gestao() && S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : ''));
   h += '<div class="kpis">' + kpi('No processo', base.length, '', 'Welcome Flow e trainees') + kpi('Welcome Flow', cont['Onboard'], '', 'esperando o 1º dia') +
     kpi('Dia 1 feito', cont['Trainee 1'], '', 'falta o 2º dia') + kpi('Prontos pra servir', cont['Trainee 2'], '', 'fizeram os 2 dias', { cls: cont['Trainee 2'] ? 'alerta' : '' }) + '</div>';
   var prontos = base.filter(function (s) { return s.etapa === 'Trainee 2' && (!S.trArea || s.area_id === S.trArea || (S.trArea === SEM_AREA && !s.area_id)); });
@@ -524,7 +524,7 @@ function vTrainees(c) {
     opts(areasVis.map(function (a) { return [a.id, a.nome]; }).concat(gestao() ? [[SEM_AREA, 'Sem área definida']] : []), S.trArea, 'Todas as áreas') + '</select>' : '') + '</div>' +
     (S.trEtapa === 'todas' && prontos.length ? '<div class="sec-h"><h2>Em andamento</h2></div>' : '') +
     listaOuVazio(lst.map(function (s) { return linhaTrainee(c, s); }), 'Ninguém aqui.') + '</div>';
-  if (gestao() && !S.r.inboard) h += '<p class="kpi-d" style="margin-top:14px">O formulário Inboard ainda não está ligado: quando estiver, as respostas novas entram aqui sozinhas.</p>';
+  if (gestao() && !S.r.inboard) h += '<p class="kpi-d" style="margin-top:14px">O formulário Onboard ainda não está ligado: quando estiver, as respostas novas entram aqui sozinhas.</p>';
   return h;
 }
 
@@ -882,7 +882,7 @@ function mPessoa(c, id) {
   if (!id) return h + '</div>';
   var ex = jsonObj(p.extras, null);
   if (ex && ex.Inboard) {
-    h += '<div class="bloco"><h3>Respostas do Inboard</h3>' + (ex['respondido em'] ? '<p class="kpi-d" style="margin-bottom:8px">respondido em ' + fmtData(ex['respondido em']) + '</p>' : '') +
+    h += '<div class="bloco"><h3>Respostas do formulário Onboard</h3>' + (ex['respondido em'] ? '<p class="kpi-d" style="margin-bottom:8px">respondido em ' + fmtData(ex['respondido em']) + '</p>' : '') +
       info(Object.keys(ex.Inboard).map(function (k) { return [esc(k), ex.Inboard[k]]; })) + '</div>';
   }
   var obs = (c.d.obs || []).filter(function (o) { return o.pessoa_id === p.id; }).sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
@@ -1245,7 +1245,7 @@ document.addEventListener('click', function (ev) {
       api('sincronizarPlanilhas').then(function (r) { S.resumoSync = r.resumoSync; aplicar(r); abrirModal('sync'); }).catch(falha);
     },
     'sync-inboard': function () {
-      toast('Lendo o Inboard…');
+      toast('Lendo o Onboard…');
       api('sincronizarInboard').then(function (r) { S.resumoSync = r.resumoSync; aplicar(r); abrirModal('sync'); }).catch(falha);
     },
     crew: function () { S.crew = v; render(); },
