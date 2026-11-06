@@ -1026,7 +1026,8 @@ function mPessoa(c, id) {
         '<button class="btn sm primary" data-acao="serv-add" data-id="' + p.id + '">+ colocar</button></div>' : '') + '</div>';
   }
   h += '<div class="bloco"><h3>Dados</h3><form data-form="pessoa" class="form"><input type="hidden" name="id" value="' + esc(p.id) + '">' +
-    '<label class="field full">Nome completo<input type="text" name="nome" value="' + esc(p.nome) + '" required></label>' +
+    '<label class="field full">Nome completo<input type="text" name="nome" value="' + esc(p.nome) + '" required' + (id ? '' : ' data-acao="busca-dup" autocomplete="off"') + '></label>' +
+    (id ? '' : '<div class="full" id="res-dup"></div><label class="checks full"><label><input type="checkbox" name="forcar" value="sim"> É outra pessoa (o nome parecido abaixo não é ela)</label></label>') +
     '<label class="field">Data de nascimento<input type="date" name="nascimento" value="' + esc(p.nascimento) + '"></label>' +
     '<label class="field">WhatsApp<input type="tel" name="telefone" value="' + esc(p.telefone) + '"></label>' +
     '<label class="field">ZFAM (líder)<input type="text" name="zfam" list="lzf" value="' + esc(p.zfam) + '"' + (soZfam ? ' readonly' : '') + '><small>vazio = sem ZFAM</small></label>' +
@@ -1074,7 +1075,7 @@ function resultadosAdd(q, alvo, acao) {
   var c = C(), base = S.r.dados.busca && S.r.dados.busca.length ? S.r.dados.busca : c.pessoas, areaId = S.modal.id, ja = {};
   c.servico.forEach(function (s) { if (s.area_id === areaId) ja[s.pessoa_id] = 1; });
   var k = norm(q).join(' ');
-  var l = k.length < 2 ? [] : base.filter(function (p) { return !ja[p.id] && norm(p.nome).join(' ').indexOf(k) >= 0; }).slice(0, 12);
+  var l = k.length < 2 ? [] : base.filter(function (p) { return !ja[p.id] && norm(p.nome).join(' ').indexOf(k) >= 0; }).slice(0, 30);
   document.getElementById(alvo || 'res-add').innerHTML = l.map(function (p) {
     return '<div class="item" data-acao="' + (acao || 'add-escolher') + '" data-id="' + p.id + '" data-nome="' + esc(nomeFmt(p.nome)) + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + '</span></div>' +
       '<div class="cs">' + tagApto(c.apto(p)) + '</div><div class="side-r"><span class="btn sm">escolher</span></div></div>';
@@ -1565,6 +1566,15 @@ document.addEventListener('input', function (ev) {
   if (a === 'busca') { S.busca = t.value; refocar('[data-acao=busca]', t); }
   if (a === 'busca-equipe') { S.buscaEquipe = t.value; refocar('[data-acao=busca-equipe]', t); }
   if (a === 'busca-add') resultadosAdd(t.value);
+  if (a === 'busca-dup') {
+    var k = norm(t.value).join(' '), box = document.getElementById('res-dup'), cc = C();
+    var achados = k.length < 3 ? [] : cc.pessoas.filter(function (p) {
+      var n = norm(p.nome).join(' '), tk = norm(t.value);
+      return n.indexOf(k) >= 0 || (tk.length > 1 && tk.every(function (x) { return n.indexOf(x) >= 0; }));
+    }).slice(0, 15);
+    box.innerHTML = achados.length ? '<div class="nota alerta" style="margin:0 0 6px">Já cadastrados com esse nome: abra o certo em vez de criar outro.</div><div class="list">' +
+      achados.map(function (p) { return itemEscolha(cc, p, 'pessoa'); }).join('') + '</div>' : '';
+  }
   if (a === 'busca-wf') resultadosAdd(t.value, 'res-wf', 'wf-ligar-escolher');
   if (a === 'busca-trainee' && document.getElementById('res-trainee')) resultadosAdd(t.value, 'res-trainee', 'trainee-escolher');
 });
