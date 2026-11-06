@@ -746,9 +746,18 @@ function vPessoas(c) {
   };
   var q = norm(S.busca).join(' ');
   var lst = c.pessoas.filter(F[S.filtroPessoas][1]).filter(function (p) { return !q || norm(p.nome).join(' ').indexOf(q) >= 0 || norm(p.zfam).join(' ').indexOf(q) >= 0; })
-    .sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+    .sort(function (a, b) {
+      var o = S.ordemPessoas || 'az';
+      if (o === 'za') return b.nome.localeCompare(a.nome);
+      if (o === 'idade') return (c.idade(b) || 0) - (c.idade(a) || 0) || a.nome.localeCompare(b.nome);
+      if (o === 'novos') return (c.idade(a) || 99) - (c.idade(b) || 99) || a.nome.localeCompare(b.nome);
+      if (o === 'areas') return (c.serv[b.id] || []).length - (c.serv[a.id] || []).length || a.nome.localeCompare(b.nome);
+      if (o === 'zfam') return String(a.zfam || '~').localeCompare(String(b.zfam || '~')) || a.nome.localeCompare(b.nome);
+      return a.nome.localeCompare(b.nome);
+    });
   var h = ph('todo mundo', 'Adolescentes', c.pessoas.length + ' no cadastro.', '<button class="btn primary" data-acao="pessoa-nova">+ adolescente</button>');
-  h += '<div class="filtros"><input type="search" data-acao="busca" placeholder="Buscar por nome ou ZFAM" value="' + esc(S.busca) + '" aria-label="Buscar"><div class="seg">' + Object.keys(F).map(function (k) {
+  h += '<div class="filtros"><input type="search" data-acao="busca" placeholder="Buscar por nome ou ZFAM" value="' + esc(S.busca) + '" aria-label="Buscar"><select data-acao="ordem-pessoas" aria-label="Ordenar">' +
+    opts([['az', 'Ordem: A → Z'], ['za', 'Ordem: Z → A'], ['idade', 'Mais velhos primeiro'], ['novos', 'Mais novos primeiro'], ['areas', 'Mais áreas primeiro'], ['zfam', 'Por ZFAM']], S.ordemPessoas || 'az') + '</select><div class="seg">' + Object.keys(F).map(function (k) {
     return '<button class="' + (S.filtroPessoas === k ? 'on' : '') + '" data-acao="filtro-pessoas" data-v="' + k + '">' + F[k][0] + ' <em>' + c.pessoas.filter(F[k][1]).length + '</em></button>';
   }).join('') + '</div></div>';
   return h + listaOuVazio(lst.slice(0, 300).map(function (p) { return linhaPessoa(c, p, null, (c.serv[p.id] || []).map(tagEtapa).join('')); }), 'Ninguém encontrado.');
@@ -878,8 +887,13 @@ function crewPessoas(c, info) {
   }
   h += '<div class="filtros"><input type="search" data-acao="busca-equipe" placeholder="Buscar adulto" value="' + esc(S.buscaEquipe) + '" aria-label="Buscar adulto">' +
     '<select data-acao="filtro-equipe" aria-label="Filtrar">' + opts([['__lid', 'Com liderança'], ['__acesso', 'Com acesso ao painel']].concat(lugares.map(function (l) { return [l, l + ' (' + mins[l] + ')']; })), filtro, 'Todos os lugares') + '</select>' +
+    '<select data-acao="ordem-equipe" aria-label="Ordenar">' + opts([['az', 'Ordem: A → Z'], ['za', 'Ordem: Z → A'], ['mais', 'Mais carga primeiro'], ['menos', 'Menos carga primeiro'], ['lugares', 'Mais lugares onde serve']], S.ordemEquipe || 'az') + '</select>' +
     '<button class="btn" data-acao="adulto-novo">+ adulto</button></div>';
-  return h + listaOuVazio(lst.map(function (x) { return linhaAdulto(c, x); }), 'Ninguém aqui.');
+  var ORD = { az: function (a, b) { return a.e.nome.localeCompare(b.e.nome); }, za: function (a, b) { return b.e.nome.localeCompare(a.e.nome); },
+              mais: function (a, b) { return b.f.carga - a.f.carga || a.e.nome.localeCompare(b.e.nome); }, menos: function (a, b) { return a.f.carga - b.f.carga || a.e.nome.localeCompare(b.e.nome); },
+              lugares: function (a, b) { return b.f.lst.length - a.f.lst.length || b.f.carga - a.f.carga; } };
+  lst.sort(ORD[S.ordemEquipe] || ORD.az);
+  return h + '<p class="kpi-d" style="margin-bottom:8px">' + lst.length + ' adulto(s)</p>' + listaOuVazio(lst.map(function (x) { return linhaAdulto(c, x); }), 'Ninguém aqui.');
 }
 function crewCarga(c, info) {
   var alta = info.filter(function (x) { return x.f.nivel === 'alta'; }).sort(function (a, b) { return b.f.carga - a.f.carga; });
@@ -1530,6 +1544,8 @@ document.addEventListener('change', function (ev) {
   if (a === 'so-ae') { S.soAE = el.checked; render(); }
   if (a === 'tr-area') { S.trArea = el.value; render(); }
   if (a === 'filtro-equipe') { S.filtroEquipe = el.value; render(); }
+  if (a === 'ordem-equipe') { S.ordemEquipe = el.value; render(); }
+  if (a === 'ordem-pessoas') { S.ordemPessoas = el.value; render(); }
   if (a === 'perfil-acesso') { var box = el.closest('form').querySelector('.escopo'); if (box) box.hidden = el.value !== 'lider'; }
   if (a === 'papel-onde') { var l = el.closest('.papel'); l.querySelector('[data-p=zfam]').hidden = el.value !== 'zfam'; }
   if (el.hasAttribute('data-outro')) {
