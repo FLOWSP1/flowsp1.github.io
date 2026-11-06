@@ -521,6 +521,15 @@ function vTrainees(c) {
     opts(areasVis.map(function (a) { return [a.id, a.nome]; }).concat(gestao() ? [[SEM_AREA, 'Sem área definida']] : []), S.trArea, 'Todas as áreas') + '</select>' : '') + '</div>' +
     (S.trEtapa === 'todas' && prontos.length ? '<div class="sec-h"><h2>Em andamento</h2></div>' : '') +
     listaOuVazio(lst.map(function (s) { return linhaTrainee(c, s); }), 'Ninguém aqui.') + '</div>';
+  var pend = gestao() ? (c.d.pendentes || []) : [];
+  if (pend.length) {
+    h += secao('Pendentes de confirmar', 'Vieram de uma importação e não cruzaram com nenhum cadastro. Abra cada um pra ligar à pessoa certa ou cadastrar como novo.',
+      listaOuVazio(pend.map(function (x) {
+        return '<div class="item" data-acao="pendente" data-id="' + x.id + '"><div class="nm"><b>' + esc(x.nome) + '</b><span>' + esc(x.telefone || 'sem telefone') + ' · ' + fmtDataHora(x.data) + '</span></div>' +
+          '<div class="cs">' + tag('pendente', 'warn') + (x.area_id ? tag(nomeArea(c, x.area_id), 'line') : '') + (x.etapa ? tag(ETAPA_NOME[x.etapa] || x.etapa, 'tr') : '') +
+          (x.wf === 'Sim' ? tag('foi no Welcome Flow', 'ok') : '') + '</div><div class="side-r"><span class="btn sm">confirmar</span></div></div>';
+      }), ''));
+  }
   if (gestao() && !S.r.inboard) h += '<p class="kpi-d" style="margin-top:14px">O formulário Onboard ainda não está ligado: quando estiver, as respostas novas entram aqui sozinhas.</p>';
   return h;
 }
@@ -599,31 +608,49 @@ function mImportAcomp(c) {
   var P = S.importPrev && S.importPrev.tipo === 'acomp' ? S.importPrev : null;
   var h = cab('trainees', 'Importar acompanhamento') + '<div class="drawer-b">';
   if (!P) {
-    return h + '<p class="kpi-d" style="margin-bottom:12px">Cole o texto dos contatos, no formato da mensagem: "1. Nome", "📱 telefone", "• Escolheu:", "• Área final:", a orientação (⚠️ ou ✅) e a resposta (🟰). ' +
-      'A <b>área final</b> é a que vale. Antes de gravar, você confere tudo.</p>' +
-      '<form data-form="prev-acomp"><label class="field">Texto do acompanhamento<textarea name="texto" rows="16" required></textarea></label>' +
+    return h + '<p class="kpi-d" style="margin-bottom:12px">Cole qualquer lista de pessoas: <b>uma por linha</b>, ou <b>numeradas</b> (1., 2., 3.), ou uma por parágrafo. ' +
+      'Basta o <b>nome</b>. Se tiver telefone, "Nome - Área", "Área final:" ou a resposta do contato, o painel aproveita. ' +
+      'Quem não cruzar com nenhum cadastro fica <b>pendente</b> pra vocês confirmarem depois. Nada é gravado antes de você conferir.</p>' +
+      '<form data-form="prev-acomp"><label class="field">Texto<textarea name="texto" rows="16" placeholder="1. Fulano da Silva - Recepção&#10;foi no Welcome Flow, vai fazer o trainee sábado&#10;&#10;2. Beltrana Souza&#10;já concluiu o trainee" required></textarea></label>' +
       '<div class="acoes"><button class="btn primary" type="submit">Ver prévia</button></div></form></div>';
   }
   var areas = areasTeen(c.areas).map(function (a) { return [a.id, a.nome]; });
-  var etapas = S.r.etapas.filter(function (e) { return e !== 'Voluntário'; }).map(function (e) { return [e, ETAPA_NOME[e]]; }).concat([['Voluntário', 'Voluntário']]);
-  return h + '<p class="kpi-d" style="margin-bottom:12px">Confira cada pessoa. A etapa e o Welcome Flow foram lidos da resposta; mude o que precisar. A etapa só avança (nunca volta). ' +
-    'O texto inteiro fica guardado como observação na ficha.</p>' + P.previa.map(function (x) {
+  var etapas = S.r.etapas.map(function (e) { return [e, ETAPA_NOME[e]]; });
+  var achados = P.previa.filter(function (x) { return x.pessoa_id; }).length;
+  return h + '<p class="kpi-d" style="margin-bottom:12px"><b>' + achados + ' de ' + P.previa.length + '</b> cruzaram com um cadastro. Os outros ficam como <b>pendente</b> ' +
+    '(a não ser que você escolha a pessoa certa ou "cadastrar como novo"). A etapa e o Welcome Flow foram lidos do texto; mude o que precisar. A etapa só avança.</p>' +
+    P.previa.map(function (x) {
       var op = [];
       if (x.pessoa_id) op.push([x.pessoa_id, 'achado: ' + nomeFmt(x.pessoa_nome)]);
       x.sugestoes.forEach(function (s) { op.push([s.id, 'talvez: ' + nomeFmt(s.nome) + (s.zfam ? ' (ZFAM ' + s.zfam + ')' : '')]); });
-      return '<div class="serv-box" data-acomp="' + x.i + '"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(x.nome) + '</b><span class="kpi-d">' + esc(x.telefone) + '</span></div>' +
-        '<div class="kpi-d">Escolheu: ' + esc(x.escolheu || '?') + ' · Área final: <b>' + esc(x.areaFinal || '?') + '</b></div>' +
-        (x.orientacao ? '<div class="kpi-d">Orientação: ' + esc(x.orientacao) + '</div>' : '') +
-        '<div class="nota ' + (x.resposta ? 'info2' : 'alerta') + '" style="margin:0">' + (x.resposta ? 'Resposta: ' + esc(x.resposta) : 'Sem resposta ainda') + '</div>' +
-        '<div class="serv-datas" style="grid-template-columns:1.4fr 1fr 1fr"><label class="field">Cadastro<select data-k="pessoa_id">' + opts(op, x.pessoa_id, 'cadastrar como novo') + '</select></label>' +
+      op.push(['__pendente', 'deixar pendente (confirmar depois)'], ['__novo', 'cadastrar como novo']);
+      return '<div class="serv-box" data-acomp="' + x.i + '"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(x.nome) + '</b>' +
+        (x.pessoa_id ? tag('cruzou', 'ok') : x.sugestoes.length ? tag('nome parecido: escolha', 'warn') : tag('não achado: pendente', 'warn')) + '</div>' +
+        (x.telefone || x.areaFinal ? '<div class="kpi-d">' + [x.telefone, x.areaFinal ? 'área: ' + x.areaFinal : ''].filter(Boolean).map(esc).join(' · ') + '</div>' : '') +
+        (x.resto ? '<div class="nota info2" style="margin:0;white-space:pre-wrap">' + esc(String(x.resto).slice(0, 400)) + '</div>' : '') +
+        '<div class="serv-datas" style="grid-template-columns:1.4fr 1fr 1fr"><label class="field">Cadastro<select data-k="pessoa_id">' + opts(op, x.pessoa_id || '__pendente') + '</select></label>' +
         '<label class="field">Área<select data-k="area_id">' + opts(areas, x.area_id, 'área a definir') + '</select></label>' +
         '<label class="field">Etapa<select data-k="etapa">' + opts(etapas, x.etapa) + '</select></label></div>' +
         '<div class="checks"><label><input type="checkbox" data-k="wf"' + (x.wf === 'Sim' ? ' checked' : '') + '> foi no Welcome Flow</label>' +
-        '<label><input type="checkbox" data-k="pular"> não importar esta pessoa</label></div></div>';
+        '<label><input type="checkbox" data-k="pular"> ignorar esta linha</label></div></div>';
     }).join('') +
-    '<div class="acoes"><button class="btn" data-acao="prev-voltar">Voltar</button><button class="btn primary" data-acao="acomp-aplicar">Aplicar ' + P.previa.length + ' pessoa(s)</button></div></div>';
+    '<div class="acoes"><button class="btn" data-acao="prev-voltar">Voltar</button><button class="btn primary" data-acao="acomp-aplicar">Gravar ' + P.previa.length + ' pessoa(s)</button></div></div>';
 }
-
+/** Gaveta: ligar um pendente a um cadastro (sugestões pelo primeiro nome + busca), cadastrar como novo ou descartar. */
+function mPendente(c, id) {
+  var x = (c.d.pendentes || []).filter(function (q) { return q.id === id; })[0];
+  if (!x) return cab('pendente', 'Não encontrado') + '<div class="drawer-b"></div>';
+  var tk = norm(x.nome);
+  var sug = c.pessoas.filter(function (p) { return norm(p.nome)[0] === tk[0]; }).slice(0, 10);
+  return cab('pendente · ' + (x.origem || 'importação'), esc(x.nome), (x.area_id ? tag(nomeArea(c, x.area_id), 'line') : '') + (x.etapa ? tag(ETAPA_NOME[x.etapa] || x.etapa, 'tr') : '') +
+      (x.wf === 'Sim' ? tag('foi no Welcome Flow', 'ok') : '')) +
+    '<div class="drawer-b">' + (x.telefone ? '<p class="kpi-d">' + esc(x.telefone) + '</p>' : '') +
+    (x.texto ? '<div class="nota" style="white-space:pre-wrap;margin:8px 0 14px">' + esc(x.texto) + '</div>' : '') +
+    '<p class="kpi-d" style="margin-bottom:10px">Quem é essa pessoa no cadastro? Ao ligar, a área, a etapa e o Welcome Flow acima vão pra ficha dela.</p>' +
+    (sug.length ? '<h3 style="font-size:14px;margin-bottom:8px">Mesmo primeiro nome</h3><div class="list" style="margin-bottom:16px">' + sug.map(function (p) { return itemEscolha(c, p, 'pend-ligar'); }).join('') + '</div>' : '') +
+    '<label class="field">Buscar outro nome<input type="search" data-acao="busca-pend" autocomplete="off"></label><div class="list" id="res-pend" style="margin-top:10px"><p class="vazio">Digite pelo menos 2 letras.</p></div>' +
+    '<div class="acoes"><button class="btn danger" data-acao="pend-descartar">Descartar</button><button class="btn" data-acao="pend-novo">Não está no cadastro: cadastrar "' + esc(x.nome) + '"</button></div></div>';
+}
 /* ---------- área só da CREW (Check-in): adultos, sem trainee ---------- */
 function vAreaCrew(c, a) {
   var eq = gestao() ? (c.d.equipe || []) : (c.d.equipeArea || []);
@@ -979,7 +1006,7 @@ function mensagemAcesso(a) {
 function abrirModal(tipo, id, refresh) {
   S.modal = { tipo: tipo, id: id };
   var c = C(), html = { pessoa: mPessoa, inscricao: mInscricao, area: mArea, meta: mMeta, zfam: mZfam, adulto: mAdulto, addArea: mAddArea, trainee: mTrainee,
-                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar,
+                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar, pendente: mPendente,
                         importPresenca: mImportPresenca, importAcomp: mImportAcomp }[tipo](c, id);
   var m = document.getElementById('drawer');
   var gaveta = m.querySelector('.drawer'), rol = refresh && gaveta ? gaveta.scrollTop : 0;
@@ -1468,6 +1495,10 @@ document.addEventListener('click', function (ev) {
         .catch(function (e) { el.disabled = false; falha(e); });
     },
     'wf-ligar': function () { abrirModal('wfLigar', v); },
+    pendente: function () { abrirModal('pendente', id); },
+    'pend-ligar': function () { api('resolverPendente', S.modal.id, id).then(function (r) { fecharModal(); aplicar(r); toast('Ligado ao cadastro'); }).catch(falha); },
+    'pend-novo': function () { if (confirm('Cadastrar como adolescente novo?')) api('resolverPendente', S.modal.id, '__novo').then(function (r) { fecharModal(); aplicar(r); toast('Cadastrado'); }).catch(falha); },
+    'pend-descartar': function () { if (confirm('Descartar este pendente?')) api('resolverPendente', S.modal.id, '__descartar').then(function (r) { fecharModal(); aplicar(r); toast('Descartado'); }).catch(falha); },
     'wf-ligar-escolher': function () {
       api('vincularPresencaWF', S.modal.id, id || '').then(function (r) { fecharModal(); aplicar(r); toast(id ? 'Ligado ao cadastro' : 'Desligado'); }).catch(falha);
     },
@@ -1575,6 +1606,7 @@ document.addEventListener('input', function (ev) {
     box.innerHTML = achados.length ? '<div class="nota alerta" style="margin:0 0 6px">Já cadastrados com esse nome: abra o certo em vez de criar outro.</div><div class="list">' +
       achados.map(function (p) { return itemEscolha(cc, p, 'pessoa'); }).join('') + '</div>' : '';
   }
+  if (a === 'busca-pend') resultadosAdd(t.value, 'res-pend', 'pend-ligar');
   if (a === 'busca-wf') resultadosAdd(t.value, 'res-wf', 'wf-ligar-escolher');
   if (a === 'busca-trainee' && document.getElementById('res-trainee')) resultadosAdd(t.value, 'res-trainee', 'trainee-escolher');
 });
