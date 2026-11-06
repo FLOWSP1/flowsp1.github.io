@@ -534,37 +534,66 @@ function vTrainees(c) {
   return h;
 }
 
-/* ---------- Welcome Flow (lista de presença) ---------- */
+/* ---------- Welcome Flow: cada encontro é um evento, com a sua lista de presentes ---------- */
+function eventosWf(c) {
+  var ev = {};
+  (c.d.eventosWf || []).forEach(function (e) { ev[e.data] = { data: e.data, nome: e.nome, obs: e.obs, presentes: [] }; });
+  (c.d.wf || []).forEach(function (w) { (ev[w.data] = ev[w.data] || { data: w.data, nome: '', obs: '', presentes: [] }).presentes.push(w); });
+  return Object.keys(ev).sort().reverse().map(function (k) { return ev[k]; });
+}
+function nomeEvento(e) { return (e.nome ? e.nome + ' · ' : '') + fmtData(e.data); }
 function vWf(c) {
-  var lista = (c.d.wf || []).slice();
-  var datas = {};
-  lista.forEach(function (w) { (datas[w.data] = datas[w.data] || []).push(w); });
-  var ds = Object.keys(datas).sort().reverse();
-  var ligados = lista.filter(function (w) { return w.pessoa_id && c.porId[w.pessoa_id]; }).length;
+  var evs = eventosWf(c);
+  if (!S.wfData || !evs.some(function (e) { return e.data === S.wfData; })) S.wfData = evs.length ? evs[0].data : '';
+  var total = (c.d.wf || []).length, ligados = (c.d.wf || []).filter(function (w) { return w.pessoa_id && c.porId[w.pessoa_id]; }).length;
   var semWf = c.trainees.filter(function (s) { return exigeWF(s) && !wfDe(c, c.porId[s.pessoa_id]).ok; });
-  var h = ph('processo', 'Welcome Flow', 'O encontro presencial antes do trainee. Desde ' + fmtData(S.r.wfInicio) + ', só começa o trainee quem foi. ' +
-    'Cole a lista de presença de cada encontro: o painel liga cada nome ao cadastro e mostra quem precisa confirmar.',
-    '<button class="btn primary" data-acao="importar-presenca">+ lista de presença</button><button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>');
-  h += '<div class="kpis">' + kpi('Encontros', ds.length, '', ds.length ? 'último em ' + fmtData(ds[0]) : 'nenhuma lista lançada') +
-    kpi('Presentes no último', ds.length ? datas[ds[0]].length : 0, '', 'adolescentes na lista') +
-    kpi('Ligados ao cadastro', ligados, lista.length ? 'de ' + lista.length : '', lista.length - ligados ? (lista.length - ligados) + ' nome(s) pra ligar' : 'todos ligados', { cls: lista.length - ligados ? 'alerta' : '' }) +
+  var h = ph('processo', 'Welcome Flow', 'Cada encontro é um evento com a sua lista de presença. Desde ' + fmtData(S.r.wfInicio) + ', só começa o trainee quem foi num deles.',
+    '<button class="btn primary" data-acao="wf-evento-novo">+ novo Welcome Flow</button><button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>');
+  h += '<div class="kpis">' + kpi('Encontros', evs.length, '', evs.length ? 'último em ' + fmtData(evs[0].data) : 'nenhum ainda') +
+    kpi('Presenças', total, '', 'somando todos os encontros') +
+    kpi('Sem cadastro ligado', total - ligados, '', total - ligados ? 'nomes da lista pra ligar' : 'todos ligados', { cls: total - ligados ? 'alerta' : '' }) +
     kpi('Trainees sem Welcome Flow', semWf.length, '', 'no processo novo, sem presença nem confirmação', { cls: semWf.length ? 'alerta' : '' }) + '</div>';
-  if (semWf.length) h += secao('Trainees sem Welcome Flow confirmado', 'Entraram no processo depois de ' + fmtData(S.r.wfInicio) + '. Abra a pessoa pra confirmar (Head ou Core) ou ligue o nome na lista abaixo.',
-    listaOuVazio(semWf.map(function (s) { return linhaTrainee(c, s); }), ''));
-  ds.forEach(function (d) {
-    var ws = datas[d].slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); });
-    h += secao('Encontro de ' + fmtData(d), ws.length + ' presente(s)', listaOuVazio(ws.map(function (w) {
+  if (!evs.length) return h + '<div class="list" style="margin-top:20px"><p class="vazio">Nenhum encontro ainda. Clique em "+ novo Welcome Flow".</p></div>';
+  h += '<div class="picks" style="margin-top:20px">' + evs.map(function (e) {
+    return '<button class="' + (e.data === S.wfData ? 'on' : '') + '" data-acao="wf-evento" data-v="' + e.data + '">' + esc(nomeEvento(e)) + ' <em>' + e.presentes.length + '</em></button>';
+  }).join('') + '</div>';
+  var ev = evs.filter(function (e) { return e.data === S.wfData; })[0];
+  var ws = ev.presentes.slice().sort(function (a, b) {
+    var la = a.pessoa_id && c.porId[a.pessoa_id] ? 1 : 0, lb = b.pessoa_id && c.porId[b.pessoa_id] ? 1 : 0;
+    return la - lb || a.nome.localeCompare(b.nome);                               // os que faltam ligar primeiro
+  });
+  var falta = ws.filter(function (w) { return !(w.pessoa_id && c.porId[w.pessoa_id]); }).length;
+  h += '<div class="area-h"><div><h2>' + esc(ev.nome || 'Welcome Flow') + ' ' + tag(fmtData(ev.data), 'navy') + '</h2><dl>' +
+    '<dt>Presentes</dt><dd>' + ws.length + (falta ? ' · <span class="falta">' + falta + ' sem cadastro ligado</span>' : '') + '</dd>' +
+    (ev.obs ? '<dt>Obs.</dt><dd>' + esc(ev.obs) + '</dd>' : '') + '</dl></div>' +
+    '<div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-acao="wf-evento-editar">Editar</button>' +
+    '<button class="btn" data-acao="importar-presenca">Colar lista</button><button class="btn primary" data-acao="wf-add">+ pessoa</button></div></div>';
+  h += secao('Lista de presença', 'Clique no nome pra abrir a ficha. "Ligar" junta o nome da lista ao cadastro certo (ex.: apelido ou outro sobrenome).',
+    listaOuVazio(ws.map(function (w) {
       var p = w.pessoa_id && c.porId[w.pessoa_id];
       var onde = p ? (c.serv[p.id] || []).map(function (s) { return tag(nomeArea(c, s.area_id), 'line') + tagEtapa(s); }).join('') : '';
       return '<div class="item"' + (p ? ' data-acao="pessoa" data-id="' + p.id + '"' : '') + '><div class="nm"><b>' + esc(p ? nomeFmt(p.nome) : w.nome) + '</b><span>' +
-        (p && norm(p.nome).join(' ') !== norm(w.nome).join(' ') ? 'na lista: ' + esc(w.nome) + ' · ' : '') + (w.area_texto ? esc(w.area_texto) : 'sem área na lista') + '</span></div>' +
+        (p && norm(p.nome).join(' ') !== norm(w.nome).join(' ') ? 'na lista: ' + esc(w.nome) + ' · ' : '') + (w.area_texto ? esc(w.area_texto) : (p ? (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') : '')) + '</span></div>' +
         '<div class="cs">' + (p ? tag('cadastro ligado', 'ok') + onde : tag('sem cadastro ligado', 'warn')) + '</div>' +
-        '<div class="side-r" data-stop="1"><button class="btn sm" data-acao="wf-ligar" data-v="' + w.id + '">' + (p ? 'trocar' : 'ligar') + '</button>' +
+        '<div class="side-r" data-stop="1"><button class="btn sm' + (p ? '' : ' primary') + '" data-acao="wf-ligar" data-v="' + w.id + '">' + (p ? 'trocar' : 'ligar') + '</button>' +
         '<button class="btn sm danger" data-acao="wf-tirar" data-v="' + w.id + '">tirar</button></div></div>';
-    }), ''));
-  });
-  if (!ds.length) h += '<div class="list" style="margin-top:20px"><p class="vazio">Nenhuma lista lançada ainda. Clique em "+ lista de presença".</p></div>';
+    }), 'Ninguém na lista ainda. Use "Colar lista" ou "+ pessoa".'));
+  if (semWf.length) h += secao('Trainees sem Welcome Flow confirmado', 'Entraram no processo depois de ' + fmtData(S.r.wfInicio) + '. Ponha na lista do encontro em que estiveram, ou confirme na ficha.',
+    listaOuVazio(semWf.map(function (s) { return linhaTrainee(c, s); }), ''));
   return h;
+}
+function mWfEvento(c, data) {
+  var e = data ? (eventosWf(c).filter(function (x) { return x.data === data; })[0] || { data: data }) : { data: '', nome: '', obs: '' };
+  return cab('Welcome Flow', data ? 'Editar encontro' : 'Novo encontro') + '<div class="drawer-b"><form data-form="wf-evento" class="form">' +
+    '<label class="field">Data<input type="date" name="data" value="' + esc(e.data) + '" required' + (data ? ' readonly' : '') + '></label>' +
+    '<label class="field">Nome (opcional)<input type="text" name="nome" value="' + esc(e.nome) + '" placeholder="ex.: Welcome Flow de outubro"></label>' +
+    '<label class="field full">Observação<textarea name="obs">' + esc(e.obs) + '</textarea></label>' +
+    '<div class="acoes full"><button class="btn primary" type="submit">Salvar</button></div></form></div>';
+}
+function mWfAdd(c, data) {
+  return cab('Welcome Flow · ' + fmtData(data), 'Pôr na lista de presença') + '<div class="drawer-b"><p class="kpi-d" style="margin-bottom:10px">Busque o adolescente no cadastro.</p>' +
+    '<input type="search" data-acao="busca-wfadd" placeholder="Digite o nome" autocomplete="off" aria-label="Nome">' +
+    '<div class="list" id="res-wfadd" style="margin-top:10px"><p class="vazio">Digite pelo menos 2 letras.</p></div></div>';
 }
 /** Gaveta: ligar um nome da lista de presença a um cadastro (sugestões pelo primeiro nome + busca). */
 function mWfLigar(c, id) {
@@ -588,7 +617,7 @@ function mImportPresenca(c) {
   var P = S.importPrev && S.importPrev.tipo === 'presenca' ? S.importPrev : null;
   var h = cab('Welcome Flow', 'Lançar lista de presença') + '<div class="drawer-b">';
   if (!P) {
-    return h + '<form data-form="prev-presenca" class="form"><label class="field">Data do encontro<input type="date" name="data" value="' + esc(S.r.wfInicio || '') + '" required></label><span></span>' +
+    return h + '<form data-form="prev-presenca" class="form"><label class="field">Data do encontro<input type="date" name="data" value="' + esc(S.wfData || S.r.wfInicio || '') + '" required></label><span></span>' +
       '<label class="field full">Lista de presentes<textarea name="texto" rows="14" placeholder="Um nome por linha. Pode ter a área depois de um traço:&#10;Fulano da Silva - Recepção&#10;Beltrana Souza - Ainda não serve" required></textarea>' +
       '<small>Linhas de título (como "Presentes ontem…") são ignoradas.</small></label>' +
       '<div class="acoes full"><button class="btn primary" type="submit">Ver prévia</button></div></form></div>';
@@ -1006,7 +1035,7 @@ function mensagemAcesso(a) {
 function abrirModal(tipo, id, refresh) {
   S.modal = { tipo: tipo, id: id };
   var c = C(), html = { pessoa: mPessoa, inscricao: mInscricao, area: mArea, meta: mMeta, zfam: mZfam, adulto: mAdulto, addArea: mAddArea, trainee: mTrainee,
-                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar, pendente: mPendente,
+                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar, pendente: mPendente, wfEvento: mWfEvento, wfAdd: mWfAdd,
                         importPresenca: mImportPresenca, importAcomp: mImportAcomp }[tipo](c, id);
   var m = document.getElementById('drawer');
   var gaveta = m.querySelector('.drawer'), rol = refresh && gaveta ? gaveta.scrollTop : 0;
@@ -1495,6 +1524,11 @@ document.addEventListener('click', function (ev) {
         .catch(function (e) { el.disabled = false; falha(e); });
     },
     'wf-ligar': function () { abrirModal('wfLigar', v); },
+    'wf-evento': function () { S.wfData = v; render(); },
+    'wf-evento-novo': function () { abrirModal('wfEvento', ''); },
+    'wf-evento-editar': function () { abrirModal('wfEvento', S.wfData); },
+    'wf-add': function () { abrirModal('wfAdd', S.wfData); },
+    'wf-add-escolher': function () { api('adicionarPresencaWF', S.modal.id, id).then(function (r) { aplicar(r); toast('Posto na lista'); abrirModal('wfAdd', S.modal.id); }).catch(falha); },
     pendente: function () { abrirModal('pendente', id); },
     'pend-ligar': function () { api('resolverPendente', S.modal.id, id).then(function (r) { fecharModal(); aplicar(r); toast('Ligado ao cadastro'); }).catch(falha); },
     'pend-novo': function () { if (confirm('Cadastrar como adolescente novo?')) api('resolverPendente', S.modal.id, '__novo').then(function (r) { fecharModal(); aplicar(r); toast('Cadastrado'); }).catch(falha); },
@@ -1606,6 +1640,7 @@ document.addEventListener('input', function (ev) {
     box.innerHTML = achados.length ? '<div class="nota alerta" style="margin:0 0 6px">Já cadastrados com esse nome: abra o certo em vez de criar outro.</div><div class="list">' +
       achados.map(function (p) { return itemEscolha(cc, p, 'pessoa'); }).join('') + '</div>' : '';
   }
+  if (a === 'busca-wfadd') resultadosAdd(t.value, 'res-wfadd', 'wf-add-escolher');
   if (a === 'busca-pend') resultadosAdd(t.value, 'res-pend', 'pend-ligar');
   if (a === 'busca-wf') resultadosAdd(t.value, 'res-wf', 'wf-ligar-escolher');
   if (a === 'busca-trainee' && document.getElementById('res-trainee')) resultadosAdd(t.value, 'res-trainee', 'trainee-escolher');
@@ -1668,6 +1703,7 @@ document.addEventListener('submit', function (ev) {
       abrirModal(pres ? 'importPresenca' : 'importAcomp', '', true);
     }).catch(soltar);
   }
+  if (tipo === 'wf-evento') api('salvarEventoWF', o).then(function (r) { S.wfData = o.data; fecharModal(); aplicar(r); toast(r.msg); }).catch(falha);
   if (tipo === 'wf-pessoa') api('salvarPessoa', o).then(function (r) { aplicar(r); toast('Welcome Flow salvo'); }).catch(falha);
   if (tipo === 'trainee') {
     travar();
