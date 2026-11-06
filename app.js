@@ -3,7 +3,7 @@
 
 var PARAMS = new URLSearchParams(location.search);
 var PAGINA = PARAMS.get('pagina') || 'painel';
-var ETAPA_NOME = { 'Onboard': 'Welcome Flow', 'Trainee 1': 'Trainee · dia 1', 'Trainee 2': 'Trainee · dia 2', 'Voluntário': 'Voluntário' };
+var ETAPA_NOME = { 'Onboard': 'Esperando dia 1', 'Trainee 1': 'Trainee · dia 1', 'Trainee 2': 'Trainee · dia 2', 'Voluntário': 'Voluntário' };
 var PERFIL = { core: 'Core', head: 'Head', lider: 'Liderança', lider_area: 'Liderança', lider_zfam: 'Liderança' };
 var SEM_AREA = '__sem', A_CONFIRMAR = '__confirmar';
 var ABERTAS = ['formularioPublico', 'inscrever', 'cadastrarCrew', 'entrarComCodigo', 'entrarComSenha', 'pedirCodigoEmail', 'confirmarCodigoEmail'];
@@ -174,9 +174,34 @@ function tagEtapa(s) {
 }
 function tagApto(ap) { return tag(ap.txt, ap.ok ? 'ok' : ap.ok === null ? 'warn' : 'bad'); }
 function lideresDe(a) { return a ? String(a.lideres || '').trim() : ''; }
+function soCrew(id) { return !!id && (S.r.areasSoCrew || []).indexOf(id) >= 0; }
+function areasTeen(l) { return l.filter(function (a) { return !soCrew(a.id); }); }
+/** Foi no Welcome Flow? Presença na lista (com data) ou confirmação de Head/Core. ok: true, false ou null (a confirmar). */
+function wfDe(c, p) {
+  var pres = (c.d.wf || []).filter(function (w) { return w.pessoa_id === p.id; }).sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
+  if (pres.length) return { ok: true, data: pres[0].data, fonte: 'lista', pres: pres, txt: 'Welcome Flow ' + fmtCurta(pres[0].data) };
+  if (p.wf === 'Sim') return { ok: true, data: p.wf_data, fonte: 'confirmado', pres: [], txt: 'Welcome Flow' + (p.wf_data ? ' ' + fmtCurta(p.wf_data) : ' (confirmado)') };
+  if (p.wf === 'Não') return { ok: false, pres: [], txt: 'Não foi no Welcome Flow' };
+  return { ok: null, pres: [], txt: 'Welcome Flow a confirmar' };
+}
+/** Desde S.r.wfInicio o Welcome Flow é obrigatório antes do trainee. Quem já estava no processo antes é "processo antigo". */
+function exigeWF(s) {
+  var ini = S.r.wfInicio || '2026-10-31';
+  if (s.origem === 'inboard' || s.origem === 'acompanhamento') return true;
+  var d = s.desde || s.dia1 || s.welcome || '';
+  return !!d && d >= ini;
+}
+function tagWF(c, s) {
+  var p = c.porId[s.pessoa_id], w = wfDe(c, p);
+  if (w.ok) return tag(w.txt, 'ok', w.fonte === 'lista' ? 'na lista de presença' : 'confirmado por Head ou Core');
+  if (!exigeWF(s)) return tag('processo antigo', 'line', 'já estava no processo antes do Welcome Flow de ' + fmtData(S.r.wfInicio));
+  return w.ok === false ? tag('sem Welcome Flow', 'bad') : tag('Welcome Flow a confirmar', 'warn');
+}
 /** O próximo passo de quem está no processo: o que fazer e com quem falar. */
 function proximoPasso(c, s) {
-  var a = c.areaId[s.area_id], lid = lideresDe(a);
+  var a = c.areaId[s.area_id], lid = lideresDe(a), w = wfDe(c, c.porId[s.pessoa_id]);
+  if (exigeWF(s) && w.ok === false) return { txt: 'Precisa fazer o Welcome Flow antes do trainee' };
+  if (exigeWF(s) && w.ok === null && s.etapa === 'Onboard') return { txt: 'Confirmar se foi no Welcome Flow antes de marcar o trainee' };
   if (s.etapa === 'Trainee 2') return { pronto: true, txt: 'Fez os 2 dias: pode começar como voluntário' + (lid ? '. Falar com ' + lid : (s.area_id ? '' : '. Defina a área')) };
   if (s.etapa === 'Trainee 1') return { txt: 'Falta o 2º dia de trainee' + (s.horario ? ' (' + s.horario + ')' : '') };
   return { txt: s.area_id ? 'Marcar o 1º dia de trainee' + (lid ? ' com ' + lid : '') : 'Escolher a área e marcar o 1º dia' };
@@ -198,13 +223,17 @@ function escopoTexto(c, areas, zfams) {
 function tabsDoPerfil() {
   var u = S.r.usuario, t = [];
   if (!gestao()) {
-    if (u.areas.length) { t.push(['areas', u.areas.length > 1 ? 'Minhas áreas' : 'Minha área']); t.push(['trainees', 'Trainees']); }
+    t.push(['geral', 'Visão geral']);
+    if (u.areas.length) {
+      t.push(['areas', u.areas.length > 1 ? 'Minhas áreas' : 'Minha área']);
+      if (u.areas.some(function (id) { return !soCrew(id); })) t.push(['trainees', 'Trainees']);
+    }
     if (u.zfams.length) t.push(['zfams', u.zfams.length > 1 ? 'Meus ZFAMs' : 'Meu ZFAM']);
     return t;
   }
   var pend = (S.r.dados.cadastros || []).filter(function (x) { return x.status === 'Pendente'; }).length;
   var prontos = (S.r.dados.servico || []).filter(function (s) { return s.status !== 'Parado' && s.etapa === 'Trainee 2'; }).length;
-  return [['geral', 'Visão geral'], ['areas', 'Áreas'], ['trainees', 'Trainees', prontos], ['zfams', 'ZFAMs'], ['inscricoes', 'Inscrições'],
+  return [['geral', 'Visão geral'], ['areas', 'Áreas'], ['trainees', 'Trainees', prontos], ['wf', 'Welcome Flow'], ['zfams', 'ZFAMs'], ['inscricoes', 'Inscrições'],
           ['pessoas', 'Adolescentes'], ['crew', 'CREW FLOW', pend]];
 }
 function navHtml(tabs) {
@@ -221,7 +250,7 @@ function render() {
   var tabs = tabsDoPerfil();
   if (!S.tab || !tabs.some(function (t) { return t[0] === S.tab; })) S.tab = tabs[0][0];
   var c = C(), u = S.r.usuario;
-  var corpo = { geral: vGeral, areas: vAreas, trainees: vTrainees, zfams: vZfams, inscricoes: vInscricoes, pessoas: vPessoas, crew: vCrew }[S.tab](c);
+  var corpo = { geral: vGeral, areas: vAreas, trainees: vTrainees, wf: vWf, zfams: vZfams, inscricoes: vInscricoes, pessoas: vPessoas, crew: vCrew }[S.tab](c);
   var aviso = gestao() && !c.pessoas.length ? '<div class="aviso"><div><b>O painel ainda não tem os adolescentes.</b> Puxe das planilhas antigas (formulário, voluntários e ZFAMs). Não apaga nada.</div>' +
     '<button class="btn primary" data-acao="sync">Puxar das planilhas antigas</button></div>' : '';
   var papel = u.perfil === 'lider' ? 'Liderança · ' + escopoTexto(c, u.areas, u.zfams) : PERFIL[u.perfil];
@@ -292,92 +321,75 @@ function entrou(r, persistir) {
   aplicar(r);
 }
 
-/* ---------- visão geral ---------- */
+/* ---------- visão geral (a capa: todo mundo vê os números; as partes com nomes são só da gestão) ---------- */
 function vGeral(c) {
-  var servindo = c.pessoas.filter(function (p) { return c.situacao(p) === 'servindo'; });
-  var stats = c.areas.map(function (a) { return { a: a, s: c.statsArea(a) }; });
-  var comIdeal = stats.filter(function (x) { return x.s.ideal !== null; });
-  var idealTotal = comIdeal.reduce(function (t, x) { return t + x.s.ideal; }, 0);
-  var falta = comIdeal.reduce(function (t, x) { return t + Math.max(0, x.s.ideal - x.s.vol.length); }, 0);
-  var volComIdeal = comIdeal.reduce(function (t, x) { return t + Math.min(x.s.vol.length, x.s.ideal); }, 0);
-  var porEtapa = { 'Onboard': 0, 'Trainee 1': 0, 'Trainee 2': 0 };
-  c.trainees.forEach(function (s) { porEtapa[s.etapa] = (porEtapa[s.etapa] || 0) + 1; });
-  var emZ = c.pessoas.filter(function (p) { return p.zfam; });
-  var emZserv = emZ.filter(function (p) { var s = c.situacao(p); return s === 'servindo' || s === 'formacao'; });
-  var novas = (c.d.inscricoes || []).filter(function (i) { return i.status === 'Nova' && (i.ministerio === 'Áreas Executivas' || i.area_interesse) && !jaServe(c, i); });
-
-  var h = ph('visão geral', 'Como estão as Áreas Executivas', 'Dados de ' + fmtData(S.r.hoje) + '. Clique numa barra ou num número pra abrir.',
-    '<button class="btn" data-acao="sync">Atualizar com as planilhas antigas</button>' + (S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : ''));
+  var R = S.r.resumo, pe = R.porEtapa;
+  var acts = gestao() ? '<button class="btn" data-acao="sync">Atualizar com as planilhas antigas</button>' + (S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : '') : '';
+  var h = ph('visão geral', 'Como estão as Áreas Executivas', 'Dados de ' + fmtData(R.hoje) + '.' + (gestao() ? ' Clique numa barra ou num número pra abrir.' : ''), acts);
   h += '<div class="kpis">' +
-    kpi('Voluntários servindo', servindo.length, '', idealTotal ? pct(volComIdeal, idealTotal) + '% do ideal preenchido (' + volComIdeal + ' de ' + idealTotal + ')' : 'ideal das áreas a definir') +
-    kpi('Em formação', c.trainees.length, '', 'Welcome Flow e trainees', { acao: 'tab', v: 'trainees' }) +
-    kpi('Faltam pro ideal', falta, '', (stats.length - comIdeal.length) ? (stats.length - comIdeal.length) + ' área(s) sem ideal definido' : 'somando todas as áreas', { cls: falta ? 'alerta' : '' }) +
-    kpi('Prontos pra servir', porEtapa['Trainee 2'], '', 'fizeram os 2 dias de trainee', { acao: 'tab', v: 'trainees', cls: porEtapa['Trainee 2'] ? 'alerta' : '' }) + '</div>';
-
-  // gráficos: voluntários por área (com o ideal) e o funil de entrada
-  var ord = stats.slice().sort(function (x, y) { return (x.s.gap === null ? 99 : x.s.gap) - (y.s.gap === null ? 99 : y.s.gap); });
-  var max = Math.max.apply(null, [1].concat(ord.map(function (x) { return Math.max(x.s.vol.length, x.s.ideal || 0); })));
+    kpi('Voluntários servindo', R.servindo, '', R.idealTotal ? pct(R.volComIdeal, R.idealTotal) + '% do ideal preenchido (' + R.volComIdeal + ' de ' + R.idealTotal + ')' : 'ideal das áreas a definir') +
+    kpi('Em formação', R.formacao, '', 'Welcome Flow e trainees', gestao() || S.r.usuario.areas.length ? { acao: 'tab', v: 'trainees' } : null) +
+    kpi('Faltam pro ideal', R.falta, '', R.semIdeal ? R.semIdeal + ' área(s) sem ideal definido' : 'somando todas as áreas', { cls: R.falta ? 'alerta' : '' }) +
+    kpi('Prontos pra servir', pe['Trainee 2'], '', 'fizeram os 2 dias de trainee', { acao: gestao() || S.r.usuario.areas.length ? 'tab' : '', v: 'trainees', cls: pe['Trainee 2'] ? 'alerta' : '' }) + '</div>';
+  var ord = R.areas.slice().sort(function (x, y) { return (x.ideal === null ? 99 : x.vol - x.ideal) - (y.ideal === null ? 99 : y.vol - y.ideal); });
+  var max = Math.max.apply(null, [1].concat(ord.map(function (x) { return Math.max(x.vol, x.ideal || 0); })));
+  var podeAbrir = function (id) { return gestao() || S.r.usuario.areas.indexOf(id) >= 0; };
   var barras = ord.map(function (x) {
-    var v = x.s.vol.length, ideal = x.s.ideal;
-    var tip = x.a.nome + ': ' + v + ' voluntário(s)' + (ideal !== null ? ' de ' + ideal + ' (ideal)' : ', ideal a definir') + (x.s.form.length ? ' · ' + x.s.form.length + ' em formação' : '');
-    var val = ideal === null ? '<b>' + v + '</b> · ideal ?' : x.s.gap < 0 ? '<b>' + v + '</b>/' + ideal + ' · faltam ' + (-x.s.gap) : '<b>' + v + '</b>/' + ideal + ' · ok';
-    return '<div class="crow" data-acao="ir-area" data-v="' + x.a.id + '" data-tip="' + esc(tip) + '"><span class="lab">' + esc(x.a.nome) + '</span>' +
-      '<span class="track"><span class="fill ' + (headCls(x.a.head) || 'sem') + '" style="width:' + (100 * v / max) + '%"></span>' +
+    var v = x.vol, ideal = x.ideal, gap = ideal === null ? null : v - ideal;
+    var tip = x.nome + ': ' + v + (x.crew ? ' adulto(s) da CREW' : ' voluntário(s)') + (ideal !== null ? ' de ' + ideal + ' (ideal)' : ', ideal a definir') + (x.form ? ' · ' + x.form + ' em formação' : '');
+    var val = ideal === null ? '<b>' + v + '</b> · ideal ?' : gap < 0 ? '<b>' + v + '</b>/' + ideal + ' · faltam ' + (-gap) : '<b>' + v + '</b>/' + ideal + ' · ok';
+    return '<div class="crow"' + (podeAbrir(x.id) ? ' data-acao="ir-area" data-v="' + x.id + '"' : '') + ' data-tip="' + esc(tip) + '"><span class="lab">' + esc(x.nome) + (x.crew ? ' <small style="color:var(--muted)">(CREW)</small>' : '') + '</span>' +
+      '<span class="track"><span class="fill ' + (headCls(x.head) || 'sem') + '" style="width:' + (100 * v / max) + '%"></span>' +
       (ideal ? '<span class="mark" style="left:calc(' + (100 * ideal / max) + '% - 1px)"></span>' : '') + '</span><span class="val">' + val + '</span></div>';
   }).join('');
   var leg = '<div class="legend"><span><i style="background:var(--mm)"></i>Multimídia</span><span><i style="background:var(--op)"></i>Operações</span>' +
     '<span><i style="background:#8C8FA3"></i>sem head</span><span><i class="mark"></i>ideal da área</span></div>';
-  var funil = [['Welcome Flow', porEtapa['Onboard'], 'fizeram o Welcome Flow presencial e esperam o 1º dia'],
-               ['Trainee · dia 1', porEtapa['Trainee 1'], 'serviram o 1º dia de trainee'],
-               ['Trainee · dia 2', porEtapa['Trainee 2'], 'serviram os 2 dias: prontos pra virar voluntários'],
-               ['Voluntários', servindo.length, 'servindo na escala']];
+  var funil = [['Esperando dia 1', pe['Onboard'], 'entraram no processo e esperam o 1º dia de trainee'], ['Trainee · dia 1', pe['Trainee 1'], 'serviram o 1º dia de trainee'],
+               ['Trainee · dia 2', pe['Trainee 2'], 'serviram os 2 dias: prontos pra virar voluntários'], ['Voluntários', R.servindo, 'servindo na escala']];
   var fmax = Math.max.apply(null, [1].concat(funil.map(function (f) { return f[1]; })));
   var funilH = '<div class="funil">' + funil.map(function (f) {
     return '<div class="crow" data-tip="' + esc(f[1] + ' ' + f[2]) + '"><span class="lab">' + f[0] + '</span><span class="track alto"><span class="fill" style="width:' + (100 * f[1] / fmax) + '%"></span></span><span class="val">' + f[1] + '</span></div>';
   }).join('') + '</div>';
-  h += '<div class="grid-ch" style="margin-top:16px">' + card('Voluntários por área', 'servindo hoje × ideal', barras + leg) +
-    card('Funil de entrada', 'onde cada um está no processo', funilH + '<p class="kpi-d" style="margin-top:12px">' + novas.length + ' inscrição(ões) nova(s) esperando contato · <button class="lnk" data-acao="tab" data-v="inscricoes">ver</button></p>') + '</div>';
+  var rodFunil = (R.wf.ultima ? '<p class="kpi-d" style="margin-top:12px">Último Welcome Flow: ' + fmtData(R.wf.ultima) + ', ' + R.wf.presentes + ' presente(s)' +
+    (gestao() ? ' · <button class="lnk" data-acao="tab" data-v="wf">ver</button>' : '') + '</p>' : '') +
+    (gestao() ? '<p class="kpi-d" style="margin-top:6px">' + R.novas + ' inscrição(ões) nova(s) esperando contato · <button class="lnk" data-acao="tab" data-v="inscricoes">ver</button></p>' : '');
+  h += '<div class="grid-ch" style="margin-top:16px">' + card('Voluntários por área', 'servindo hoje × ideal', barras + leg) + card('Funil de entrada', 'onde cada um está no processo', funilH + rodFunil) + '</div>';
 
-  // como funciona: o processo e a estrutura
   var passos = [
-    ['1', 'Inscrição', 'O adolescente se inscreve pelo formulário. Pra servir: estar num ZFAM e ter 6 meses ou mais de Flow.', novas.length, 'novas'],
-    ['2', 'Welcome Flow', 'Encontro presencial de boas-vindas: a visão do Flow e de servir. É o teórico.', porEtapa['Onboard'], 'esperando o dia 1'],
-    ['3', 'Trainee · 2 dias', 'Serve 2 cultos junto com um voluntário da área, no horário combinado.', porEtapa['Trainee 1'] + porEtapa['Trainee 2'], 'em trainee'],
-    ['4', 'Voluntário', 'Depois do 2º dia o líder da área confirma e ele entra na escala.', servindo.length, 'servindo']
+    ['1', 'Inscrição', 'O adolescente se inscreve pelo formulário. Pra servir: estar num ZFAM e ter 6 meses ou mais de Flow.', R.novas, 'novas'],
+    ['2', 'Welcome Flow', 'Encontro presencial de boas-vindas: a visão do Flow e de servir. Desde 31/10 é obrigatório antes do trainee.', pe['Onboard'], 'esperando o dia 1'],
+    ['3', 'Trainee · 2 dias', 'Serve 2 cultos junto com um voluntário da área, no horário combinado.', pe['Trainee 1'] + pe['Trainee 2'], 'em trainee'],
+    ['4', 'Voluntário', 'Depois do 2º dia o líder da área confirma e ele entra na escala.', R.servindo, 'servindo']
   ];
-  h += secao('Como funciona', 'O caminho de quem chega até servir na escala.',
-    '<div class="card"><div class="passos">' + passos.map(function (p) {
-      return '<div class="passo"><span class="n">Passo ' + p[0] + '</span><h4>' + p[1] + '</h4><p>' + p[2] + '</p><div class="q">' + p[3] + ' <small>' + p[4] + '</small></div></div>';
-    }).join('') + '</div></div>');
+  h += secao('Como funciona', 'O caminho de quem chega até servir na escala.', '<div class="card"><div class="passos">' + passos.map(function (p) {
+    return '<div class="passo"><span class="n">Passo ' + p[0] + '</span><h4>' + p[1] + '</h4><p>' + p[2] + '</p><div class="q">' + p[3] + ' <small>' + p[4] + '</small></div></div>';
+  }).join('') + '</div></div>');
   var lid = S.r.lideranca || [];
   var nomesDe = function (prefixo) { return lid.filter(function (l) { return String(l[1]).indexOf(prefixo) === 0; }).map(function (l) { return l[0] + (l[1] !== prefixo ? ' (' + l[1].replace('Head ', '') + ')' : ''); }).join(', '); };
-  var org = '<div class="org">' +
-    '<div class="niv"><b>Core</b><span>' + (esc(nomesDe('Core')) || 'o casal pastor do Flow') + '</span></div>' +
+  var org = '<div class="org"><div class="niv"><b>Core</b><span>' + (esc(nomesDe('Core')) || 'o casal pastor do Flow') + '</span></div>' +
     '<div class="niv"><b>Heads</b><span>' + (esc(nomesDe('Head')) || 'Multimídia, RH e Operações') + '</span></div>' +
     '<div class="niv"><b>Líderes de área</b><span>um ou dois por área, com um auxiliar adolescente</span></div>' +
     '<div class="niv"><b>Voluntários</b><span>adolescentes de ZFAM servindo na escala quinzenal</span></div>' +
-    '<div class="niv"><b>Trainees</b><span>no Welcome Flow ou nos 2 dias de trainee</span></div></div>';
+    '<div class="niv"><b>Trainees</b><span>no Welcome Flow ou nos 2 dias de trainee</span></div>' +
+    '<div class="niv"><b>CREW</b><span>os adultos que servem; o Check-in é só deles</span></div></div>';
   var regras = '<ul class="regras"><li>Só serve quem está num ZFAM e tem 6 meses ou mais de Flow.</li>' +
-    '<li>O voluntário entra depois de servir os 2 dias de trainee.</li><li>Aos 18 anos a pessoa vai pro VOX; antes de sair, o líder indica quem assume.</li>' +
-    '<li>Multimídia: fotografia, produção de palco, projeção, iluminação, som e livestream. Operações: apoio, recepção, check-in e ronda.</li></ul>';
+    '<li>Desde 31/10, só começa o trainee quem foi no Welcome Flow.</li><li>O voluntário entra depois de servir os 2 dias de trainee.</li>' +
+    '<li>Check-in é só da CREW (adultos), sem trainee.</li><li>Aos 18 anos a pessoa vai pro VOX; antes de sair, o líder indica quem assume.</li></ul>';
   h += '<div class="grid-2" style="margin-top:16px">' + card('Estrutura', '', org) + card('Regras', '', regras) + '</div>';
-
-  // metas
   h += secao('Metas', '', '<div class="grid-2">' + ['curto', 'longo'].map(function (prazo) {
-    var ms = (c.d.metas || []).filter(function (m) { return m.prazo === prazo; }).sort(porOrdem);
-    return card(prazo === 'curto' ? 'Curto prazo' : 'Longo prazo', '', ms.map(function (m) { return cardMeta(m, c); }).join('') || '<p class="vazio">Nenhuma meta.</p>');
-  }).join('') + '</div>', '<button class="btn sm" data-acao="meta-nova">+ meta</button>');
+    var ms = R.metas.filter(function (m) { return m.prazo === prazo; });
+    return card(prazo === 'curto' ? 'Curto prazo' : 'Longo prazo', '', ms.map(cardMeta).join('') || '<p class="vazio">Nenhuma meta.</p>');
+  }).join('') + '</div>', gestao() ? '<button class="btn sm" data-acao="meta-nova">+ meta</button>' : '');
+  if (!gestao()) return h;
 
-  // ZFAM × serviço
+  var emZ = c.pessoas.filter(function (p) { return p.zfam; });
   var zf = zfamsResumo(c).filter(function (z) { return z.lider !== '' && z.lider !== A_CONFIRMAR; });
-  h += secao('ZFAM × serviço', pct(emZserv.length, emZ.length) + '% dos adolescentes de ZFAM servem ou estão em formação (' + emZserv.length + ' de ' + emZ.length + ').',
+  h += secao('ZFAM × serviço', pct(R.zfam.servindo, R.zfam.total) + '% dos adolescentes de ZFAM servem ou estão em formação (' + R.zfam.servindo + ' de ' + R.zfam.total + ').',
     card('Quanto cada ZFAM serve', '% servindo ou em formação', zf.map(function (z) {
       var p = pct(z.serv, z.total);
       return '<div class="crow" data-acao="ir-zfam" data-v="' + esc(z.lider) + '" data-tip="' + esc(z.lider + ': ' + z.serv + ' de ' + z.total + ' servindo ou em formação' + (z.aptos ? ' · ' + z.aptos + ' podem ser convidados' : '')) + '">' +
         '<span class="lab">' + esc(z.lider) + '</span><span class="track"><span class="fill" style="width:' + p + '%"></span></span><span class="val"><b>' + p + '%</b> · ' + z.serv + '/' + z.total + '</span></div>';
     }).join('') || '<p class="vazio">Sem ZFAMs.</p>'));
-
-  // transição VOX
   var vox = c.pessoas.filter(function (p) { var s = c.situacao(p); return (s === 'servindo' || s === 'formacao') && c.selo18(p); })
     .sort(function (a, b) { return c.selo18(a).data - c.selo18(b).data; });
   h += secao('Transição pro VOX', 'Quem serve e faz 18 nos próximos 12 meses. Cada líder indica quem assume quando ele sair.',
@@ -387,33 +399,16 @@ function vGeral(c) {
         '<td>' + ss.map(function (s) { return esc(nomeArea(c, s.area_id)) + ' ' + tagEtapa(s); }).join('<br>') + '</td>' +
         '<td>' + ss.map(function (s) { var a = c.areaId[s.area_id]; return a && a.sucessor ? esc(a.sucessor) : tag('não indicado', 'bad'); }).join('<br>') + '</td></tr>';
     }).join('') + '</table></div>' : '<div class="list"><p class="vazio">Ninguém servindo faz 18 nos próximos 12 meses.</p></div>');
-
-  // correlações
   h += secao('Quem serve, entre os adolescentes de ZFAM', '', '<div class="grid-3">' +
     correlacao(c, emZ, 'Por ano de chegada no Flow', function (p) { var m = String(p.chegada || '').match(/^\d{4}/); return m ? m[0] : 'sem dado'; }) +
     correlacao(c, emZ, 'Por Raízes', function (p) { return p.raizes || 'sem dado'; }) +
     correlacao(c, emZ, 'Por idade', function (p) { var i = c.idade(p); return i === null ? 'sem dado' : i <= 14 ? '14 ou menos' : i >= 18 ? '18+' : i + ' anos'; }) + '</div>');
   return h;
 }
-function metaAuto(m, c) {
-  var vol = c.pessoas.filter(function (p) { return c.situacao(p) === 'servindo'; });
-  var st = c.areas.map(function (a) { return c.statsArea(a); });
-  switch (m.auto) {
-    case 'areas_minimo': var com = st.filter(function (s) { return s.ideal !== null; }); return [com.filter(function (s) { return s.vol.length >= s.ideal; }).length, com.length, 'áreas com o ideal'];
-    case 'teorico': return [vol.filter(function (p) { return p.teorico === 'Sim'; }).length, vol.length, 'voluntários com o novo teórico'];
-    case 'auxiliar': return [c.areas.filter(function (a) { return a.auxiliar; }).length, c.areas.length, 'áreas com auxiliar adolescente'];
-    case 'sucessor': return [c.areas.filter(function (a) { return a.sucessor; }).length, c.areas.length, 'áreas com sucessor indicado'];
-    case 'domingo': return [c.pessoas.filter(function (p) { return p.domingo === 'Sim'; }).length, vol.length, 'com escala de domingo'];
-    case 'zfam_servindo': var z = c.pessoas.filter(function (p) { return p.zfam; }); return [z.filter(function (p) { var s = c.situacao(p); return s === 'servindo' || s === 'formacao'; }).length, z.length, 'de ZFAM servindo'];
-    case 'raizes': return [vol.filter(function (p) { return p.raizes === 'Concluído'; }).length, vol.length, 'voluntários com Raízes concluído'];
-  }
-  return null;
-}
-function cardMeta(m, c) {
-  var a = metaAuto(m, c), p, txt;
-  if (a) { p = pct(a[0], a[1]); txt = a[0] + ' de ' + a[1] + ' ' + a[2]; } else { p = Math.max(0, Math.min(100, Number(m.andamento) || 0)); txt = 'andamento marcado à mão'; }
+function cardMeta(m) {
+  var p = m.pct;
   return '<div class="meta"><div class="tx">' + esc(m.texto) + '</div><div class="track"><span class="fill' + (p >= 100 ? ' cheia' : '') + '" style="width:' + p + '%"></span></div>' +
-    '<div class="ft"><span><b>' + p + '%</b> · ' + txt + (m.responsavel ? ' · resp.: ' + esc(m.responsavel) : '') + (m.data_limite ? ' · até ' + fmtData(m.data_limite) : '') + '</span>' +
+    '<div class="ft"><span><b>' + p + '%</b> · ' + esc(m.txt) + (m.responsavel ? ' · resp.: ' + esc(m.responsavel) : '') + (m.data_limite ? ' · até ' + fmtData(m.data_limite) : '') + '</span>' +
     (gestao() ? '<button class="lnk" data-acao="meta" data-id="' + m.id + '">editar</button>' : '') + '</div></div>';
 }
 function correlacao(c, base, titulo, chave) {
@@ -452,7 +447,9 @@ function vAreas(c) {
   }).join('') + (semArea.length ? '<button class="' + (S.area === SEM_AREA ? 'on' : '') + '" data-acao="area" data-v="' + SEM_AREA + '">Sem área definida <em>' + semArea.length + '</em></button>' : '') +
     (gestao() ? '<button data-acao="area-nova">+ área</button>' : '') + '</div>';
   if (S.area === SEM_AREA) return h + vSemArea(c, semArea);
-  var a = c.areaId[S.area], st = c.statsArea(a);
+  var a = c.areaId[S.area];
+  if (soCrew(a.id)) return h + vAreaCrew(c, a);
+  var st = c.statsArea(a);
   h += '<div class="area-h"><div><h2>' + esc(a.nome) + ' ' + tagHead(a.head) + '</h2><dl>' +
     '<dt>Líderes</dt><dd>' + (esc(a.lideres) || '<span class="falta">a definir</span>') + '</dd>' +
     '<dt>Auxiliar adolescente</dt><dd>' + (esc(a.auxiliar) || '<span class="falta">não tem</span>') + '</dd>' +
@@ -479,7 +476,7 @@ function vAreas(c) {
 }
 function vSemArea(c, regs) {
   var ord = regs.slice().sort(function (x, y) { return c.porId[x.pessoa_id].nome.localeCompare(c.porId[y.pessoa_id].nome); });
-  var areas = c.areas.map(function (a) { return [a.id, a.nome]; });
+  var areas = areasTeen(c.areas).map(function (a) { return [a.id, a.nome]; });
   return '<div class="area-h"><div><h2>Sem área definida</h2><p class="sub" style="color:var(--muted);margin-top:6px">Estão no processo, mas a área não foi definida. Escolha a área de cada um (a etapa continua a mesma).</p></div></div>' +
     '<div style="margin-top:16px">' + listaOuVazio(ord.map(function (s) {
       return linhaPessoa(c, c.porId[s.pessoa_id], s, '<span data-stop="1"><select data-acao="definir-area" data-servico="' + s.id + '">' + opts(areas, '', 'escolher a área…') + '</select></span>');
@@ -490,10 +487,10 @@ function vSemArea(c, regs) {
 function linhaTrainee(c, s, semArea) {
   var p = c.porId[s.pessoa_id], pp = proximoPasso(c, s), i = c.idade(p), ap = c.apto(p);
   var datas = [s.welcome ? 'WF ' + fmtCurta(s.welcome) : '', s.dia1 ? 'dia 1 ' + fmtCurta(s.dia1) : '', s.dia2 ? 'dia 2 ' + fmtCurta(s.dia2) : ''].filter(Boolean).join(' · ');
-  var tags = tagEtapa(s) + (semArea ? '' : tag(nomeArea(c, s.area_id), s.area_id ? 'line' : 'warn')) + (s.horario ? tag(s.horario, 'line', 'horário em que serve') : tag('horário ?', 'par', 'horário a definir')) +
-    (ap.ok || ap.idade ? '' : tagApto(ap)) + (s.origem === 'inboard' ? tag('Onboard', 'line', 'veio do formulário Onboard') : '');
+  var tags = tagEtapa(s) + tagWF(c, s) + (semArea ? '' : tag(nomeArea(c, s.area_id), s.area_id ? 'line' : 'warn')) + (s.horario ? tag(s.horario, 'line', 'horário em que serve') : tag('horário ?', 'par', 'horário a definir')) +
+    (ap.ok || ap.idade ? '' : tagApto(ap)) + (s.origem === 'inboard' ? tag('Onboard', 'line', 'veio do formulário Onboard') : '') + (soCrew(s.area_id) ? tag('área só da CREW: mudar', 'bad') : '');
   var botao = s.etapa === 'Trainee 2' && podeArea(s.area_id) && s.area_id ? '<button class="btn sm accent" data-acao="virar-voluntario" data-v="' + s.id + '">Virar voluntário</button>' :
-    s.etapa !== 'Trainee 2' && podeArea(s.area_id) && s.area_id ? '<button class="btn sm" data-acao="avancar" data-v="' + s.id + '">' + (s.etapa === 'Onboard' ? 'Fez o dia 1' : 'Fez o dia 2') + '</button>' : '';
+    s.etapa !== 'Trainee 2' && podeArea(s.area_id) && s.area_id && !(exigeWF(s) && wfDe(c, p).ok === false) ? '<button class="btn sm" data-acao="avancar" data-v="' + s.id + '">' + (s.etapa === 'Onboard' ? 'Fez o dia 1' : 'Fez o dia 2') + '</button>' : '';
   var tel = p.telefone ? '<a class="tel" href="' + wa(p.telefone) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '';
   return '<div class="item" data-acao="pessoa" data-id="' + p.id + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (i !== null ? i + ' anos · ' : '') +
     (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + (datas ? ' · ' + datas : '') + '</span></div>' +
@@ -503,14 +500,14 @@ function linhaTrainee(c, s, semArea) {
 function vTrainees(c) {
   var u = S.r.usuario;
   var base = c.trainees.filter(function (s) { return gestao() || u.areas.indexOf(s.area_id) >= 0; });
-  var areasVis = c.areas.filter(function (a) { return podeArea(a.id); });
-  var cont = { todas: base.length, 'Onboard': 0, 'Trainee 1': 0, 'Trainee 2': 0 };
-  base.forEach(function (s) { cont[s.etapa]++; });
+  var areasVis = areasTeen(c.areas.filter(function (a) { return podeArea(a.id); }));
+  var cont = { todas: base.length, 'Onboard': 0, 'Trainee 1': 0, 'Trainee 2': 0, semwf: 0 };
+  base.forEach(function (s) { cont[s.etapa]++; if (exigeWF(s) && !wfDe(c, c.porId[s.pessoa_id]).ok) cont.semwf++; });
   var lst = base.filter(function (s) { return (S.trEtapa === 'todas' || s.etapa === S.trEtapa) && (!S.trArea || s.area_id === S.trArea || (S.trArea === SEM_AREA && !s.area_id)); })
     .sort(function (a, b) { return S.r.etapas.indexOf(b.etapa) - S.r.etapas.indexOf(a.etapa) || (c.porId[a.pessoa_id].nome || '').localeCompare(c.porId[b.pessoa_id].nome || ''); });
   var h = ph('trainees', 'Trainees', 'Quem fez o Welcome Flow e está nos 2 dias de trainee. Depois do 2º dia, a pessoa pode começar como voluntária: fale com o líder da área e clique em "Virar voluntário".',
-    (areasVis.length ? '<button class="btn primary" data-acao="trainee-novo" data-v="">+ trainee</button>' : '') + (gestao() && S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : ''));
-  h += '<div class="kpis">' + kpi('No processo', base.length, '', 'Welcome Flow e trainees') + kpi('Welcome Flow', cont['Onboard'], '', 'esperando o 1º dia') +
+    (areasVis.length ? '<button class="btn primary" data-acao="trainee-novo" data-v="">+ trainee</button>' : '') + (gestao() ? '<button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>' : '') + (gestao() && S.r.inboard ? '<button class="btn" data-acao="sync-inboard">Ler o Onboard</button>' : ''));
+  h += '<div class="kpis">' + kpi('No processo', base.length, '', cont.semwf ? cont.semwf + ' sem Welcome Flow confirmado' : 'Welcome Flow e trainees', { cls: cont.semwf ? 'alerta' : '' }) + kpi('Esperando dia 1', cont['Onboard'], '', 'ainda não serviram') +
     kpi('Dia 1 feito', cont['Trainee 1'], '', 'falta o 2º dia') + kpi('Prontos pra servir', cont['Trainee 2'], '', 'fizeram os 2 dias', { cls: cont['Trainee 2'] ? 'alerta' : '' }) + '</div>';
   var prontos = base.filter(function (s) { return s.etapa === 'Trainee 2' && (!S.trArea || s.area_id === S.trArea || (S.trArea === SEM_AREA && !s.area_id)); });
   if (prontos.length && S.trEtapa === 'todas') {
@@ -518,13 +515,140 @@ function vTrainees(c) {
       listaOuVazio(prontos.map(function (s) { return linhaTrainee(c, s); }), ''));
     lst = lst.filter(function (s) { return s.etapa !== 'Trainee 2'; });     // não repete quem já está aí em cima
   }
-  h += '<div class="sec"><div class="filtros"><div class="seg">' + [['todas', 'Todos'], ['Onboard', 'Welcome Flow'], ['Trainee 1', 'Dia 1'], ['Trainee 2', 'Dia 2']].map(function (f) {
+  h += '<div class="sec"><div class="filtros"><div class="seg">' + [['todas', 'Todos'], ['Onboard', 'Esperando dia 1'], ['Trainee 1', 'Dia 1'], ['Trainee 2', 'Dia 2']].map(function (f) {
     return '<button class="' + (S.trEtapa === f[0] ? 'on' : '') + '" data-acao="tr-etapa" data-v="' + f[0] + '">' + f[1] + ' <em>' + cont[f[0]] + '</em></button>';
   }).join('') + '</div>' + (areasVis.length > 1 || gestao() ? '<select data-acao="tr-area" aria-label="Filtrar por área">' +
     opts(areasVis.map(function (a) { return [a.id, a.nome]; }).concat(gestao() ? [[SEM_AREA, 'Sem área definida']] : []), S.trArea, 'Todas as áreas') + '</select>' : '') + '</div>' +
     (S.trEtapa === 'todas' && prontos.length ? '<div class="sec-h"><h2>Em andamento</h2></div>' : '') +
     listaOuVazio(lst.map(function (s) { return linhaTrainee(c, s); }), 'Ninguém aqui.') + '</div>';
   if (gestao() && !S.r.inboard) h += '<p class="kpi-d" style="margin-top:14px">O formulário Onboard ainda não está ligado: quando estiver, as respostas novas entram aqui sozinhas.</p>';
+  return h;
+}
+
+/* ---------- Welcome Flow (lista de presença) ---------- */
+function vWf(c) {
+  var lista = (c.d.wf || []).slice();
+  var datas = {};
+  lista.forEach(function (w) { (datas[w.data] = datas[w.data] || []).push(w); });
+  var ds = Object.keys(datas).sort().reverse();
+  var ligados = lista.filter(function (w) { return w.pessoa_id && c.porId[w.pessoa_id]; }).length;
+  var semWf = c.trainees.filter(function (s) { return exigeWF(s) && !wfDe(c, c.porId[s.pessoa_id]).ok; });
+  var h = ph('processo', 'Welcome Flow', 'O encontro presencial antes do trainee. Desde ' + fmtData(S.r.wfInicio) + ', só começa o trainee quem foi. ' +
+    'Cole a lista de presença de cada encontro: o painel liga cada nome ao cadastro e mostra quem precisa confirmar.',
+    '<button class="btn primary" data-acao="importar-presenca">+ lista de presença</button><button class="btn" data-acao="importar-acomp">Importar acompanhamento</button>');
+  h += '<div class="kpis">' + kpi('Encontros', ds.length, '', ds.length ? 'último em ' + fmtData(ds[0]) : 'nenhuma lista lançada') +
+    kpi('Presentes no último', ds.length ? datas[ds[0]].length : 0, '', 'adolescentes na lista') +
+    kpi('Ligados ao cadastro', ligados, lista.length ? 'de ' + lista.length : '', lista.length - ligados ? (lista.length - ligados) + ' nome(s) pra ligar' : 'todos ligados', { cls: lista.length - ligados ? 'alerta' : '' }) +
+    kpi('Trainees sem Welcome Flow', semWf.length, '', 'no processo novo, sem presença nem confirmação', { cls: semWf.length ? 'alerta' : '' }) + '</div>';
+  if (semWf.length) h += secao('Trainees sem Welcome Flow confirmado', 'Entraram no processo depois de ' + fmtData(S.r.wfInicio) + '. Abra a pessoa pra confirmar (Head ou Core) ou ligue o nome na lista abaixo.',
+    listaOuVazio(semWf.map(function (s) { return linhaTrainee(c, s); }), ''));
+  ds.forEach(function (d) {
+    var ws = datas[d].slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+    h += secao('Encontro de ' + fmtData(d), ws.length + ' presente(s)', listaOuVazio(ws.map(function (w) {
+      var p = w.pessoa_id && c.porId[w.pessoa_id];
+      var onde = p ? (c.serv[p.id] || []).map(function (s) { return tag(nomeArea(c, s.area_id), 'line') + tagEtapa(s); }).join('') : '';
+      return '<div class="item"' + (p ? ' data-acao="pessoa" data-id="' + p.id + '"' : '') + '><div class="nm"><b>' + esc(p ? nomeFmt(p.nome) : w.nome) + '</b><span>' +
+        (p && norm(p.nome).join(' ') !== norm(w.nome).join(' ') ? 'na lista: ' + esc(w.nome) + ' · ' : '') + (w.area_texto ? esc(w.area_texto) : 'sem área na lista') + '</span></div>' +
+        '<div class="cs">' + (p ? tag('cadastro ligado', 'ok') + onde : tag('sem cadastro ligado', 'warn')) + '</div>' +
+        '<div class="side-r" data-stop="1"><button class="btn sm" data-acao="wf-ligar" data-v="' + w.id + '">' + (p ? 'trocar' : 'ligar') + '</button>' +
+        '<button class="btn sm danger" data-acao="wf-tirar" data-v="' + w.id + '">tirar</button></div></div>';
+    }), ''));
+  });
+  if (!ds.length) h += '<div class="list" style="margin-top:20px"><p class="vazio">Nenhuma lista lançada ainda. Clique em "+ lista de presença".</p></div>';
+  return h;
+}
+/** Gaveta: ligar um nome da lista de presença a um cadastro (sugestões pelo primeiro nome + busca). */
+function mWfLigar(c, id) {
+  var w = (c.d.wf || []).filter(function (x) { return x.id === id; })[0];
+  if (!w) return cab('Welcome Flow', 'Não encontrado') + '<div class="drawer-b"></div>';
+  var tk = norm(w.nome);
+  var sug = c.pessoas.filter(function (p) { return norm(p.nome)[0] === tk[0]; }).slice(0, 8);
+  return cab('lista de presença · ' + fmtData(w.data), esc(w.nome)) + '<div class="drawer-b"><p class="kpi-d" style="margin-bottom:12px">Escolha o cadastro dessa pessoa. Na dúvida, confira pelo telefone ou com o líder.</p>' +
+    (sug.length ? '<h3 style="font-size:14px;margin-bottom:8px">Mesmo primeiro nome</h3><div class="list" style="margin-bottom:16px">' + sug.map(function (p) { return itemEscolha(c, p, 'wf-ligar-escolher'); }).join('') + '</div>' : '') +
+    '<label class="field">Buscar outro nome<input type="search" data-acao="busca-wf" autocomplete="off"></label><div class="list" id="res-wf" style="margin-top:10px"><p class="vazio">Digite pelo menos 2 letras.</p></div>' +
+    '<div class="acoes">' + (w.pessoa_id ? '<button class="btn" data-acao="wf-ligar-escolher" data-id="">Desligar</button>' : '') +
+    '<button class="btn" data-acao="wf-cadastrar" data-v="' + w.id + '">Não está no cadastro: cadastrar "' + esc(w.nome) + '"</button></div></div>';
+}
+function itemEscolha(c, p, acao) {
+  var ss = (c.serv[p.id] || []).map(function (s) { return nomeArea(c, s.area_id) + ' (' + (ETAPA_NOME[s.etapa] || s.etapa) + ')'; }).join(', ');
+  return '<div class="item" data-acao="' + acao + '" data-id="' + p.id + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') +
+    (p.telefone ? ' · ' + esc(p.telefone) : '') + '</span></div><div class="cs">' + (ss ? tag(ss, 'line') : tag('não serve', 'par')) + '</div><div class="side-r"><span class="btn sm">escolher</span></div></div>';
+}
+/** Gaveta: colar a lista de presença → prévia (quem achou, sugestões) → lançar. */
+function mImportPresenca(c) {
+  var P = S.importPrev && S.importPrev.tipo === 'presenca' ? S.importPrev : null;
+  var h = cab('Welcome Flow', 'Lançar lista de presença') + '<div class="drawer-b">';
+  if (!P) {
+    return h + '<form data-form="prev-presenca" class="form"><label class="field">Data do encontro<input type="date" name="data" value="' + esc(S.r.wfInicio || '') + '" required></label><span></span>' +
+      '<label class="field full">Lista de presentes<textarea name="texto" rows="14" placeholder="Um nome por linha. Pode ter a área depois de um traço:&#10;Fulano da Silva - Recepção&#10;Beltrana Souza - Ainda não serve" required></textarea>' +
+      '<small>Linhas de título (como "Presentes ontem…") são ignoradas.</small></label>' +
+      '<div class="acoes full"><button class="btn primary" type="submit">Ver prévia</button></div></form></div>';
+  }
+  return h + '<p class="kpi-d" style="margin-bottom:12px">Encontro de <b>' + fmtData(P.data) + '</b>. Confira cada nome: "achado" é o mesmo nome do cadastro; quando só o primeiro nome bate, escolha a pessoa certa ou deixe sem ligar (dá pra ligar depois).</p>' +
+    '<div class="tbl-wrap"><table class="tbl"><tr><th>Na lista</th><th>Cadastro</th></tr>' + P.previa.map(function (x) {
+      var op = [];
+      if (x.pessoa_id) op.push([x.pessoa_id, 'achado: ' + nomeFmt(x.pessoa_nome)]);
+      x.sugestoes.forEach(function (s) { op.push([s.id, 'talvez: ' + nomeFmt(s.nome) + (s.zfam ? ' (ZFAM ' + s.zfam + ')' : '')]); });
+      return '<tr><td><b>' + esc(x.nome) + '</b><br><span class="kpi-d">' + esc(x.area || 'sem área') + '</span></td><td>' +
+        (x.repetida ? tag('já está nessa lista', 'par') : '<select data-prev="' + x.i + '" aria-label="Cadastro de ' + esc(x.nome) + '">' + opts(op, x.pessoa_id, 'deixar sem ligar') + '</select>') + '</td></tr>';
+    }).join('') + '</table></div>' +
+    '<div class="acoes"><button class="btn" data-acao="prev-voltar">Voltar</button><button class="btn primary" data-acao="presenca-lancar">Lançar presença</button></div></div>';
+}
+/** Gaveta: colar o texto do acompanhamento (contatos pelo WhatsApp) → prévia editável → aplicar. */
+function mImportAcomp(c) {
+  var P = S.importPrev && S.importPrev.tipo === 'acomp' ? S.importPrev : null;
+  var h = cab('trainees', 'Importar acompanhamento') + '<div class="drawer-b">';
+  if (!P) {
+    return h + '<p class="kpi-d" style="margin-bottom:12px">Cole o texto dos contatos, no formato da mensagem: "1. Nome", "📱 telefone", "• Escolheu:", "• Área final:", a orientação (⚠️ ou ✅) e a resposta (🟰). ' +
+      'A <b>área final</b> é a que vale. Antes de gravar, você confere tudo.</p>' +
+      '<form data-form="prev-acomp"><label class="field">Texto do acompanhamento<textarea name="texto" rows="16" required></textarea></label>' +
+      '<div class="acoes"><button class="btn primary" type="submit">Ver prévia</button></div></form></div>';
+  }
+  var areas = areasTeen(c.areas).map(function (a) { return [a.id, a.nome]; });
+  var etapas = S.r.etapas.filter(function (e) { return e !== 'Voluntário'; }).map(function (e) { return [e, ETAPA_NOME[e]]; }).concat([['Voluntário', 'Voluntário']]);
+  return h + '<p class="kpi-d" style="margin-bottom:12px">Confira cada pessoa. A etapa e o Welcome Flow foram lidos da resposta; mude o que precisar. A etapa só avança (nunca volta). ' +
+    'O texto inteiro fica guardado como observação na ficha.</p>' + P.previa.map(function (x) {
+      var op = [];
+      if (x.pessoa_id) op.push([x.pessoa_id, 'achado: ' + nomeFmt(x.pessoa_nome)]);
+      x.sugestoes.forEach(function (s) { op.push([s.id, 'talvez: ' + nomeFmt(s.nome) + (s.zfam ? ' (ZFAM ' + s.zfam + ')' : '')]); });
+      return '<div class="serv-box" data-acomp="' + x.i + '"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>' + esc(x.nome) + '</b><span class="kpi-d">' + esc(x.telefone) + '</span></div>' +
+        '<div class="kpi-d">Escolheu: ' + esc(x.escolheu || '?') + ' · Área final: <b>' + esc(x.areaFinal || '?') + '</b></div>' +
+        (x.orientacao ? '<div class="kpi-d">Orientação: ' + esc(x.orientacao) + '</div>' : '') +
+        '<div class="nota ' + (x.resposta ? 'info2' : 'alerta') + '" style="margin:0">' + (x.resposta ? 'Resposta: ' + esc(x.resposta) : 'Sem resposta ainda') + '</div>' +
+        '<div class="serv-datas" style="grid-template-columns:1.4fr 1fr 1fr"><label class="field">Cadastro<select data-k="pessoa_id">' + opts(op, x.pessoa_id, 'cadastrar como novo') + '</select></label>' +
+        '<label class="field">Área<select data-k="area_id">' + opts(areas, x.area_id, 'área a definir') + '</select></label>' +
+        '<label class="field">Etapa<select data-k="etapa">' + opts(etapas, x.etapa) + '</select></label></div>' +
+        '<div class="checks"><label><input type="checkbox" data-k="wf"' + (x.wf === 'Sim' ? ' checked' : '') + '> foi no Welcome Flow</label>' +
+        '<label><input type="checkbox" data-k="pular"> não importar esta pessoa</label></div></div>';
+    }).join('') +
+    '<div class="acoes"><button class="btn" data-acao="prev-voltar">Voltar</button><button class="btn primary" data-acao="acomp-aplicar">Aplicar ' + P.previa.length + ' pessoa(s)</button></div></div>';
+}
+
+/* ---------- área só da CREW (Check-in): adultos, sem trainee ---------- */
+function vAreaCrew(c, a) {
+  var eq = gestao() ? (c.d.equipe || []) : (c.d.equipeArea || []);
+  var info = eq.map(function (e) { return { e: e, f: funcoesDe(c, e, eq), acesso: null }; });
+  var naArea = function (e) { return lista(e.areas_ae).indexOf(a.id) >= 0 || lerPapeis(e.funcoes).some(function (p) { return p.onde === a.id; }); };
+  var dentro = info.filter(function (x) { return naArea(x.e); }).sort(function (x, y) { return x.e.nome.localeCompare(y.e.nome); });
+  var indicados = info.filter(function (x) { return !naArea(x.e) && x.f.nivel !== 'alta'; }).sort(function (x, y) { return x.f.carga - y.f.carga || x.e.nome.localeCompare(y.e.nome); }).slice(0, 12);
+  var teens = c.servico.filter(function (s) { return s.area_id === a.id && c.porId[s.pessoa_id]; });
+  var ideal = a.ideal === '' || a.ideal == null ? null : +a.ideal;
+  var h = '<div class="area-h"><div><h2>' + esc(a.nome) + ' ' + tagHead(a.head) + ' ' + tag('só CREW (adultos)', 'navy') + '</h2><dl>' +
+    '<dt>Líderes</dt><dd>' + (esc(a.lideres) || '<span class="falta">a definir</span>') + '</dd><dt>Quem serve</dt><dd>adultos da CREW, sem trainee</dd></dl></div>' +
+    (gestao() ? '<button class="btn" data-acao="area-editar" data-id="' + a.id + '">Editar área</button>' : '') + '</div>';
+  h += '<div class="kpis" style="margin-top:16px">' + kpi('Adultos no ' + esc(a.nome), dentro.length, ideal !== null ? 'de ' + ideal : '', ideal === null ? 'ideal a definir' : dentro.length < ideal ? 'faltam ' + (ideal - dentro.length) : 'completo', { cls: ideal !== null && dentro.length < ideal ? 'alerta' : '' }) +
+    kpi('Indicados', indicados.length, '', 'adultos com carga leve ou equilibrada') + kpi('Com espaço', info.filter(function (x) { return x.f.nivel === 'leve' && !naArea(x.e); }).length, '', 'carga até ' + (S.r.cargaLeve || 2)) +
+    kpi('Adolescentes aqui', teens.length, '', teens.length ? 'precisam mudar de área' : 'nenhum, como deve ser', { cls: teens.length ? 'alerta' : '' }) + '</div>';
+  var linha = function (x, extra) {
+    return '<div class="item"' + (gestao() ? ' data-acao="adulto" data-id="' + x.e.id + '"' : '') + '><div class="nm"><b>' + esc(nomeFmt(x.e.nome)) + '</b><span>' + barrinhas(x.f) + '</span></div>' +
+      '<div class="cs">' + x.f.lst.slice(0, 4).map(function (f) { return tag(f.nivel + ' · ' + f.lugar, f.nivel === 'Voluntário' ? 'line' : 'navy'); }).join('') + '</div>' +
+      '<div class="side-r" data-stop="1">' + (extra || '') + (x.e.telefone ? '<a class="tel" href="' + wa(x.e.telefone) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') + '</div></div>';
+  };
+  h += secao('Servem no ' + esc(a.nome), 'adultos da CREW com essa área', listaOuVazio(dentro.map(function (x) { return linha(x); }), 'Ninguém marcado ainda.'));
+  h += secao('Indicados pra servir no ' + esc(a.nome), 'os adultos com menos carga primeiro (Core 4, Head 3, Líder 2, Auxiliar e Voluntário 1)',
+    listaOuVazio(indicados.map(function (x) { return linha(x, gestao() ? '<button class="btn sm primary" data-acao="crew-na-area" data-id="' + x.e.id + '" data-v="' + a.id + '">colocar aqui</button>' : ''); }), 'Ninguém disponível.'));
+  if (teens.length) h += secao('Adolescentes nesta área', 'Vieram das planilhas antigas. Esta área é só da CREW: abra cada um e mude a área.',
+    listaOuVazio(teens.map(function (s) { return linhaPessoa(c, c.porId[s.pessoa_id], s, tag('mudar de área', 'bad')); }), ''));
   return h;
 }
 
@@ -735,6 +859,23 @@ function crewPessoas(c, info) {
     kpi('Com liderança', info.filter(function (x) { return x.f.lst.some(function (f) { return f.nivel !== 'Voluntário'; }); }).length, '', 'Core, Head, líder ou auxiliar') +
     kpi('Sobrecarregados', info.filter(function (x) { return x.f.nivel === 'alta'; }).length, '', 'carga ' + (S.r.cargaAlta || 5) + ' ou mais', { acao: 'crew', v: 'carga', cls: 'alerta' }) +
     kpi('Com espaço', info.filter(function (x) { return x.f.nivel === 'leve'; }).length, '', 'carga até ' + (S.r.cargaLeve || 2), { acao: 'crew', v: 'carga' }) + '</div>';
+  // líderes e auxiliares de ZFAM (aba do ciclo) que ainda não estão na CREW: só avisa, não inventa dados
+  var eqTodos = c.d.equipe || [], faltam = [];
+  (c.d.zfams || []).forEach(function (z) {
+    [[z.lider, 'Líder'], [z.auxiliar, 'Auxiliar']].forEach(function (x) {
+      var n = String(x[0] || '').trim();
+      if (!n || /^aux\b/i.test(n)) return;
+      if (!eqTodos.some(function (e) { return nomeBate(n, e.nome) || nomeBate(e.nome, n); })) faltam.push({ nome: n, nivel: x[1], zfam: z.lider });
+    });
+  });
+  if (faltam.length && !S.buscaEquipe && !filtro) {
+    h += '<div class="aviso"><div><b>' + faltam.length + ' líder(es) ou auxiliar(es) de ZFAM ainda não estão na CREW</b> (não responderam o Tally nem se cadastraram). ' +
+      'Peça pra eles se cadastrarem pelo link do cadastro, ou adicione aqui só com o nome e o papel.</div></div>' +
+      '<div class="list" style="margin-bottom:18px">' + faltam.map(function (x) {
+        return '<div class="item"><div class="nm"><b>' + esc(x.nome) + '</b><span>' + x.nivel + ' do ZFAM ' + esc(x.zfam) + '</span></div><div class="cs">' + tag('fora da CREW', 'warn') + '</div>' +
+          '<div class="side-r"><button class="btn sm" data-acao="crew-add-zfam" data-v="' + esc(JSON.stringify(x)) + '">+ pôr na CREW</button></div></div>';
+      }).join('') + '</div>';
+  }
   h += '<div class="filtros"><input type="search" data-acao="busca-equipe" placeholder="Buscar adulto" value="' + esc(S.buscaEquipe) + '" aria-label="Buscar adulto">' +
     '<select data-acao="filtro-equipe" aria-label="Filtrar">' + opts([['__lid', 'Com liderança'], ['__acesso', 'Com acesso ao painel']].concat(lugares.map(function (l) { return [l, l + ' (' + mins[l] + ')']; })), filtro, 'Todos os lugares') + '</select>' +
     '<button class="btn" data-acao="adulto-novo">+ adulto</button></div>';
@@ -822,14 +963,15 @@ function mensagemAcesso(a) {
 function abrirModal(tipo, id, refresh) {
   S.modal = { tipo: tipo, id: id };
   var c = C(), html = { pessoa: mPessoa, inscricao: mInscricao, area: mArea, meta: mMeta, zfam: mZfam, adulto: mAdulto, addArea: mAddArea, trainee: mTrainee,
-                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync }[tipo](c, id);
+                        pedido: mPedido, acesso: mAcesso, codigo: mCodigo, perguntas: mPerguntas, sync: mSync, wfLigar: mWfLigar,
+                        importPresenca: mImportPresenca, importAcomp: mImportAcomp }[tipo](c, id);
   var m = document.getElementById('drawer');
   var gaveta = m.querySelector('.drawer'), rol = refresh && gaveta ? gaveta.scrollTop : 0;
   m.innerHTML = '<div class="drawer-bg" data-acao="fundo"><div class="drawer" role="dialog" aria-modal="true">' + html + '</div></div>';
   if (rol) m.querySelector('.drawer').scrollTop = rol;
   if (!refresh) { var f = m.querySelector('.drawer-b input:not([type=hidden]), .drawer .x'); if (f) f.focus(); }
 }
-function fecharModal() { S.modal = null; S.perguntas = null; var m = document.getElementById('drawer'); if (m) m.innerHTML = ''; }
+function fecharModal() { S.modal = null; S.perguntas = null; S.importPrev = null; var m = document.getElementById('drawer'); if (m) m.innerHTML = ''; }
 function cab(eyebrow, titulo, tags) {
   return '<div class="drawer-h"><div class="tt"><p class="eyebrow">' + eyebrow + '</p><h2>' + titulo + '</h2>' + (tags ? '<div class="tags">' + tags + '</div>' : '') + '</div>' +
     '<button class="x" data-acao="fechar" aria-label="Fechar">×</button></div>';
@@ -846,11 +988,11 @@ function mPessoa(c, id) {
     id ? (i !== null ? tag(i + ' anos', 'line') : '') + (x ? tag(x.txt, x.cls) : '') + tagApto(ap) : '') + '<div class="drawer-b">';
   if (id) {
     var ss = c.serv[p.id] || [];
-    var minhasAreas = c.areas.filter(function (a) { return podeArea(a.id); });
+    var minhasAreas = areasTeen(c.areas.filter(function (a) { return podeArea(a.id); }));
     var etapas = S.r.etapas.map(function (e) { return [e, ETAPA_NOME[e] || e]; });
     h += '<div class="bloco"><h3>Onde serve</h3>' + (ss.length ? ss.map(function (s) {
       var pode = podeArea(s.area_id) || (!s.area_id && gestao());
-      var areasOpc = c.areas.filter(function (a) { return a.id === s.area_id || (pode && podeArea(a.id)); }).map(function (a) { return [a.id, a.nome]; });
+      var areasOpc = c.areas.filter(function (a) { return a.id === s.area_id || (pode && podeArea(a.id) && !soCrew(a.id)); }).map(function (a) { return [a.id, a.nome]; });
       var dis = pode ? '' : ' disabled';
       var pp = s.etapa !== 'Voluntário' && s.status !== 'Parado' ? proximoPasso(c, s) : null;
       return '<div class="serv-box" data-servico="' + s.id + '"><div class="serv"><select data-acao="serv-area" aria-label="Área"' + dis + '>' + opts(areasOpc, s.area_id, s.area_id ? undefined : 'área a definir') + '</select>' +
@@ -880,6 +1022,15 @@ function mPessoa(c, id) {
     '<datalist id="lzf">' + zfams.map(function (z) { return '<option value="' + esc(z) + '">'; }).join('') + '</datalist>' +
     '<div class="acoes full"><button class="btn primary" type="submit">Salvar dados</button></div></form></div>';
   if (!id) return h + '</div>';
+  var w = wfDe(c, p);
+  h += '<div class="bloco"><h3>Welcome Flow</h3><p>' + tag(w.txt, w.ok ? 'ok' : w.ok === false ? 'bad' : 'warn') + '</p>' +
+    w.pres.map(function (x) { return '<div class="nota certo" style="margin-top:8px">Na lista de presença de ' + fmtData(x.data) + (norm(x.nome).join(' ') !== norm(p.nome).join(' ') ? ' (como "' + esc(x.nome) + '")' : '') + '</div>'; }).join('') +
+    (p.wf_obs ? '<div class="nota" style="margin-top:8px">' + esc(p.wf_obs) + '</div>' : '') +
+    (gestao() && !w.pres.length ? '<form data-form="wf-pessoa" class="form" style="margin-top:10px"><input type="hidden" name="id" value="' + esc(p.id) + '"><input type="hidden" name="nome" value="' + esc(p.nome) + '">' +
+      '<label class="field">Foi no Welcome Flow?<select name="wf">' + opts([['Sim', 'Sim, foi'], ['Não', 'Não foi']], p.wf, 'a confirmar') + '</select></label>' +
+      '<label class="field">Data<input type="date" name="wf_data" value="' + esc(p.wf_data) + '"></label>' +
+      '<label class="field full">Como foi confirmado<input type="text" name="wf_obs" value="' + esc(p.wf_obs) + '" placeholder="ex.: confirmou por WhatsApp; estava no Welcome Flow antigo"></label>' +
+      '<div class="acoes full" style="margin-top:0"><button class="btn" type="submit">Salvar Welcome Flow</button></div></form>' : '') + '</div>';
   var ex = jsonObj(p.extras, null);
   if (ex && ex.Inboard) {
     h += '<div class="bloco"><h3>Respostas do formulário Onboard</h3>' + (ex['respondido em'] ? '<p class="kpi-d" style="margin-bottom:8px">respondido em ' + fmtData(ex['respondido em']) + '</p>' : '') +
@@ -914,7 +1065,7 @@ function resultadosAdd(q, alvo, acao) {
   }).join('') || '<p class="vazio">' + (k.length >= 2 ? 'Ninguém com esse nome. Preencha como novo.' : 'Digite pelo menos 2 letras.') + '</p>';
 }
 function mTrainee(c, areaId) {
-  var areas = c.areas.filter(function (a) { return podeArea(a.id); });
+  var areas = areasTeen(c.areas.filter(function (a) { return podeArea(a.id); }));
   var t = S.novoTrainee || {};
   return cab('trainee', 'Novo trainee') + '<div class="drawer-b"><p class="kpi-d" style="margin-bottom:14px">Quem fez o Welcome Flow ou já está nos dias de trainee. Busque o nome; se não achar, preencha como novo.</p>' +
     '<form data-form="trainee" class="form"><input type="hidden" name="pessoa_id" value="' + esc(t.id || '') + '">' +
@@ -924,7 +1075,7 @@ function mTrainee(c, areaId) {
       '<label class="field">Data de nascimento<input type="date" name="nascimento"></label><label class="field">WhatsApp<input type="tel" name="telefone"></label>' +
       '<label class="field full">ZFAM (líder)<input type="text" name="zfam" list="lzf2"><datalist id="lzf2">' + (c.d.nomesZfams || []).map(function (z) { return '<option value="' + esc(z) + '">'; }).join('') + '</datalist></label>') +
     '<label class="field">Área<select name="area_id" required>' + opts(areas.map(function (a) { return [a.id, a.nome]; }), areaId || (areas.length === 1 ? areas[0].id : ''), 'Escolha') + '</select></label>' +
-    '<label class="field">Etapa<select name="etapa">' + opts([['Onboard', 'Welcome Flow (ainda não serviu)'], ['Trainee 1', 'Já fez o dia 1'], ['Trainee 2', 'Já fez os 2 dias']], 'Onboard') + '</select></label>' +
+    '<label class="field">Etapa<select name="etapa">' + opts([['Onboard', 'Esperando o dia 1 (ainda não serviu)'], ['Trainee 1', 'Já fez o dia 1'], ['Trainee 2', 'Já fez os 2 dias']], 'Onboard') + '</select></label>' +
     '<label class="field">Horário em que serve<input type="text" name="horario" placeholder="ex.: sábado 19h" list="lhor">' + datalistHorarios(c) + '</label>' +
     '<label class="field">Data do Welcome Flow<input type="date" name="welcome"></label>' +
     '<div class="acoes full"><button class="btn primary" type="submit">Salvar trainee</button></div></form></div>';
@@ -939,7 +1090,7 @@ function mInscricao(c, id) {
   if (!gestao()) return h + '</div>';
   var interesse = (c.areas.filter(function (a) { return a.nome === i.area_interesse; })[0] || {}).id;
   return h + '<div class="bloco"><h3>Encaminhar pro Welcome Flow</h3><p class="kpi-d" style="margin-bottom:10px">A pessoa entra no processo da área (Welcome Flow). Se ainda não estiver cadastrada, o cadastro é criado com os dados da inscrição.</p>' +
-    '<div class="serv"><select data-novo="area" aria-label="Área">' + opts(c.areas.map(function (a) { return [a.id, a.nome]; }), interesse, 'área a definir') + '</select><span></span><span></span>' +
+    '<div class="serv"><select data-novo="area" aria-label="Área">' + opts(areasTeen(c.areas).map(function (a) { return [a.id, a.nome]; }), soCrew(interesse) ? '' : interesse, 'área a definir') + '</select><span></span><span></span>' +
     '<button class="btn primary" data-acao="encaminhar" data-id="' + i.id + '">Encaminhar</button></div></div>' +
     '<div class="bloco"><h3>Status</h3><form data-form="inscricao" class="form"><input type="hidden" name="id" value="' + i.id + '">' +
     '<label class="field">Status<select name="status">' + opts(S.r.statusInscricao, i.status) + '</select></label>' +
@@ -1279,6 +1430,51 @@ document.addEventListener('click', function (ev) {
       S.token = meu.token;
       api('sessao').then(function (r) { S.voltar = null; S.tab = 'crew'; S.crew = 'acessos'; S.area = null; S.zfam = null; fecharModal(); aplicar(r); }).catch(falha);
     },
+    'importar-presenca': function () { S.importPrev = null; abrirModal('importPresenca', ''); },
+    'importar-acomp': function () { S.importPrev = null; abrirModal('importAcomp', ''); },
+    'prev-voltar': function () { var t = S.modal.tipo; S.importPrev = null; abrirModal(t, '', true); },
+    'presenca-lancar': function () {
+      var P = S.importPrev, esc0 = {};
+      document.querySelectorAll('.drawer [data-prev]').forEach(function (sel) { esc0[sel.getAttribute('data-prev')] = sel.value; });
+      el.disabled = true;
+      api('registrarPresencaWF', P.data, P.texto, true, esc0).then(function (r) { S.importPrev = null; fecharModal(); aplicar(r); toast(r.msg); })
+        .catch(function (e) { el.disabled = false; falha(e); });
+    },
+    'acomp-aplicar': function () {
+      var P = S.importPrev, esc0 = {};
+      document.querySelectorAll('.drawer [data-acomp]').forEach(function (box) {
+        var v = function (k) { var x = box.querySelector('[data-k=' + k + ']'); return x.type === 'checkbox' ? x.checked : x.value; };
+        esc0[box.getAttribute('data-acomp')] = { pessoa_id: v('pessoa_id'), area_id: v('area_id'), etapa: v('etapa'), wf: v('wf') ? 'Sim' : '', pular: v('pular') };
+      });
+      el.disabled = true;
+      api('importarAcompanhamento', P.texto, true, esc0).then(function (r) { S.importPrev = null; fecharModal(); aplicar(r); toast(r.msg); })
+        .catch(function (e) { el.disabled = false; falha(e); });
+    },
+    'wf-ligar': function () { abrirModal('wfLigar', v); },
+    'wf-ligar-escolher': function () {
+      api('vincularPresencaWF', S.modal.id, id || '').then(function (r) { fecharModal(); aplicar(r); toast(id ? 'Ligado ao cadastro' : 'Desligado'); }).catch(falha);
+    },
+    'wf-cadastrar': function () {
+      var w = (S.r.dados.wf || []).filter(function (x) { return x.id === v; })[0];
+      if (!w || !confirm('Cadastrar "' + w.nome + '" como adolescente novo?')) return;
+      api('salvarPessoa', { nome: w.nome }).then(function (r) { return api('vincularPresencaWF', w.id, r.salvo); })
+        .then(function (r) { fecharModal(); aplicar(r); toast('Cadastrado e ligado'); }).catch(falha);
+    },
+    'wf-tirar': function () {
+      if (confirm('Tirar este nome da lista de presença?')) api('removerPresencaWF', v).then(function (r) { aplicar(r); toast('Tirado da lista'); }).catch(falha);
+    },
+    'crew-add-zfam': function () {
+      var x = JSON.parse(v);
+      api('salvarEquipe', { nome: x.nome, ministerios: 'ZFAM', origem: 'painel', obs: x.nivel + ' do ZFAM ' + x.zfam + ' (aba do ciclo dos ZFAMs)',
+                            funcoes: JSON.stringify([{ onde: 'zfam', zfam: x.zfam, nivel: x.nivel }]) })
+        .then(function (r) { aplicar(r); toast(primeiroNome(x.nome) + ' entrou na CREW'); }).catch(falha);
+    },
+    'crew-na-area': function () {
+      var e = (S.r.dados.equipe || []).filter(function (x) { return x.id === id; })[0];
+      if (!e) return;
+      var areas = lista(e.areas_ae); if (areas.indexOf(v) < 0) areas.push(v);
+      api('salvarEquipe', { id: e.id, nome: e.nome, areas_ae: areas.join(', ') }).then(function (r) { aplicar(r); toast(primeiroNome(e.nome) + ' agora serve aqui'); }).catch(falha);
+    },
     'copiar-msg': function () { copiar(mensagemAcesso(S.codigoNovo), 'Mensagem copiada'); },
     perguntas: function () { S.perguntas = null; abrirModal('perguntas', v); },
     'perg-subir': function () { moverPergunta(el, -1); },
@@ -1351,6 +1547,7 @@ document.addEventListener('input', function (ev) {
   if (a === 'busca') { S.busca = t.value; refocar('[data-acao=busca]', t); }
   if (a === 'busca-equipe') { S.buscaEquipe = t.value; refocar('[data-acao=busca-equipe]', t); }
   if (a === 'busca-add') resultadosAdd(t.value);
+  if (a === 'busca-wf') resultadosAdd(t.value, 'res-wf', 'wf-ligar-escolher');
   if (a === 'busca-trainee' && document.getElementById('res-trainee')) resultadosAdd(t.value, 'res-trainee', 'trainee-escolher');
 });
 function dadosForm(f) {
@@ -1403,6 +1600,15 @@ document.addEventListener('submit', function (ev) {
       } else abrirModal('pessoa', r.salvo);
     }).catch(falha);
   }
+  if (tipo === 'prev-presenca' || tipo === 'prev-acomp') {
+    travar();
+    var pres = tipo === 'prev-presenca';
+    (pres ? api('registrarPresencaWF', o.data, o.texto, false) : api('importarAcompanhamento', o.texto, false)).then(function (r) {
+      S.importPrev = { tipo: pres ? 'presenca' : 'acomp', data: o.data, texto: o.texto, previa: r.previa };
+      abrirModal(pres ? 'importPresenca' : 'importAcomp', '', true);
+    }).catch(soltar);
+  }
+  if (tipo === 'wf-pessoa') api('salvarPessoa', o).then(function (r) { aplicar(r); toast('Welcome Flow salvo'); }).catch(falha);
   if (tipo === 'trainee') {
     travar();
     var pessoa = o.pessoa_id ? { id: o.pessoa_id } : { nome: o.nome, nascimento: o.nascimento, telefone: o.telefone, zfam: o.zfam };
