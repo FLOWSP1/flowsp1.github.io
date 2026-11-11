@@ -266,7 +266,7 @@ function render() {
   var corpo = { geral: vGeral, areas: vAreas, trainees: vTrainees, wf: vWf, zfams: vZfams, inscricoes: vInscricoes, pessoas: vPessoas, crew: vCrew }[S.tab](c);
   var aviso = gestao() && !c.pessoas.length ? '<div class="aviso"><div><b>O painel ainda não tem os adolescentes.</b> Puxe das planilhas antigas (formulário, voluntários e ZFAMs). Não apaga nada.</div>' +
     '<button class="btn primary" data-acao="sync">Puxar das planilhas antigas</button></div>' : '';
-  var papel = u.perfil === 'lider' ? 'Liderança · ' + escopoTexto(c, u.areas, u.zfams) : PERFIL[u.perfil];
+  var papel = u.perfil === 'lider' ? 'Liderança · ' + escopoTexto(c, u.areas, u.coordZfam ? ['*'] : u.zfams) : PERFIL[u.perfil];
   app.innerHTML = '<div class="shell"><aside class="side"><div class="brand"><img src="logo-claro.png" alt="FLOW"><span><b>Áreas Executivas</b>gestão de voluntários</span></div>' +
     navHtml(tabs) + '<div class="eu"><b>' + esc(u.nome) + '</b>' + esc(papel) + '<br>' + (S.voltar ? '' : '<button class="lnk" data-acao="sair">Sair</button>') + '</div></aside>' +
     '<div class="main"><header class="topbar"><div class="tb"><img src="logo-claro.png" alt="FLOW"><span class="tt">Áreas Executivas · ' + esc(primeiroNome(u.nome)) + '</span>' +
@@ -437,7 +437,7 @@ function correlacao(c, base, titulo, chave) {
 function linhaPessoa(c, p, s, extra, direita) {
   var i = c.idade(p), x = c.selo18(p), ap = c.apto(p);
   var tags = (s ? tagEtapa(s) : '') + (s && s.horario ? tag(s.horario, 'line') : '') + (x ? tag(x.txt, x.cls) : '') +
-    (ap.idade || ap.ok ? '' : tagApto(ap)) + (extra || '');
+    (ap.idade || ap.ok ? '' : tagApto(ap)) + lista(p.ministerios).map(function (m) { return tag(m, 'line'); }).join('') + (extra || '');
   var tel = p.telefone ? '<a class="tel" href="' + wa(p.telefone) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '<span class="tel">sem telefone</span>';
   return '<div class="item" data-acao="pessoa" data-id="' + p.id + '"><div class="nm"><b>' + esc(nomeFmt(p.nome)) + '</b><span>' + (i !== null ? i + ' anos' : 'idade ?') +
     ' · ' + (p.zfam ? 'ZFAM ' + esc(p.zfam) : 'sem ZFAM') + '</span></div><div class="cs">' + tags + '</div><div class="side-r">' + (direita || '') + tel + '</div></div>';
@@ -1185,7 +1185,11 @@ function mPessoa(c, id) {
     }).join('') + datalistHorarios(c) : '<p class="kpi-d">Não serve em nenhuma área ainda.</p>') +
       (minhasAreas.length ? '<div class="serv" style="margin-top:10px"><select data-novo="area" aria-label="Área">' + opts(minhasAreas.map(function (a) { return [a.id, a.nome]; }), '') + '</select>' +
         '<select data-novo="etapa" aria-label="Etapa">' + opts(etapas, 'Onboard') + '</select><span></span>' +
-        '<button class="btn sm primary" data-acao="serv-add" data-id="' + p.id + '">+ colocar</button></div>' : '') + '</div>';
+        '<button class="btn sm primary" data-acao="serv-add" data-id="' + p.id + '">+ colocar</button></div>' : '') +
+      '<div class="min-teen" style="margin-top:14px"><small class="kpi-d">Outros ministérios do Flow em que serve (sem trainee: é só marcar)</small><div class="checks box">' +
+      ministeriosTeen(p).map(function (m) {
+        return '<label><input type="checkbox" data-acao="min-teen" data-id="' + p.id + '" value="' + esc(m) + '"' + (lista(p.ministerios).indexOf(m) >= 0 ? ' checked' : '') + '> ' + esc(m) + '</label>';
+      }).join('') + '</div></div></div>';
   }
   h += '<div class="bloco"><h3>Dados</h3><form data-form="pessoa" class="form"><input type="hidden" name="id" value="' + esc(p.id) + '">' +
     '<label class="field full">Nome completo<input type="text" name="nome" value="' + esc(p.nome) + '" required' + (id ? '' : ' data-acao="busca-dup" autocomplete="off"') + '></label>' +
@@ -1263,7 +1267,7 @@ function mInscricao(c, id) {
   var i = (c.d.inscricoes || []).filter(function (x) { return x.id === id; })[0];
   if (!i) return cab('inscrição', 'Não encontrada') + '<div class="drawer-b"></div>';
   var campos = [['Data da inscrição', fmtData(i.data)], ['Nascimento', fmtData(i.nascimento)], ['Tempo de Flow', i.tempo_flow], ['Está em ZFAM', i.em_zfam],
-                ['Líder de ZFAM', i.lider_zfam], ['Área que gostaria de servir', i.ministerio], ['Área reconhecida', i.area_interesse], ['E-mail', i.email], ['WhatsApp', i.whatsapp]].concat(extrasDe(i.respostas));
+                ['Líder de ZFAM', i.lider_zfam], ['Área que gostaria de servir', i.ministerio], ['Área reconhecida', i.area_interesse], ['Outros ministérios', i.outros_ministerios], ['E-mail', i.email], ['WhatsApp', i.whatsapp]].concat(extrasDe(i.respostas));
   var h = cab('inscrição', esc(nomeFmt(i.nome)), tag(i.status, { 'Nova': 'warn', 'Encaminhada': 'ok' }[i.status] || 'line')) + '<div class="drawer-b"><div class="bloco">' + info(campos) +
     (i.obs && !gestao() ? '<div class="nota" style="margin-top:12px">' + esc(i.obs) + '</div>' : '') + '</div>';
   if (!gestao()) return h + '</div>';
@@ -1319,12 +1323,20 @@ function linhaPapel(F, p) {
     '<optgroup label="Áreas Executivas">' + opts(F.areas.map(function (a) { return [a.id, a.nome]; }), p.onde) + '</optgroup>' +
     '<optgroup label="ZFAM">' + opts([['zfam', 'ZFAM']], p.onde) + '</optgroup></select>' +
     '<select data-p="nivel" data-acao="papel-nivel" aria-label="Responsabilidade"><option value="">Responsabilidade</option>' +
-      opts((F.niveis || NIVEIS_PADRAO).map(function (n) { return [n, NIVEL_NOME[n] || n]; }), p.nivel) + '</select>' +
+      opts((soVoluntario(p.onde) ? ['Voluntário'] : (F.niveis || NIVEIS_PADRAO)).map(function (n) { return [n, NIVEL_NOME[n] || n]; }), soVoluntario(p.onde) ? 'Voluntário' : p.nivel) + '</select>' +
     '<button type="button" class="btn sm" data-acao="papel-tirar" aria-label="Tirar esta linha">×</button>' +
     '<select data-p="zfam" class="zf"' + (pedeLiderZfam(p) ? '' : ' hidden') + ' aria-label="Qual ZFAM"><option value="">Qual ZFAM? (nome do líder)</option>' + opts(F.zfams, p.zfam) + '</select>' +
     '<input type="text" data-p="texto" class="tx" placeholder="O que você faz lá? (opcional)" value="' + esc(p.texto) + '"></div>';
 }
 var NIVEIS_PADRAO = ['Core', 'Head', 'Líder', 'Auxiliar', 'Voluntário'];
+/** Lugares sem divisão de área nem liderança (Altomonte, a música): só voluntário. */
+function soVoluntario(onde) { return String(onde || '').indexOf('min:') === 0 && ((S.r && S.r.soVoluntario) || ['Altomonte']).indexOf(String(onde).slice(4)) >= 0; }
+/** Ministérios fora das AEs em que o adolescente pode servir (mais os que já estão na ficha dele). */
+function ministeriosTeen(p) {
+  var l = ((S.r && S.r.ministeriosTeen) || ['Intercessão', 'Alcance', 'FBS', 'Mídias', 'Jornada', 'Comunicação', 'Altomonte']).slice();
+  lista(p && p.ministerios).forEach(function (m) { if (l.indexOf(m) < 0) l.push(m); });
+  return l;
+}
 var NIVEL_NOME = { 'Head': 'Head / Coordenador' };
 /** Só líder, auxiliar e voluntário de ZFAM dizem qual ZFAM. Core e Coordenador de ZFAM cuidam de vários, sem um líder específico. */
 function pedeLiderZfam(p) { return p.onde === 'zfam' && p.nivel !== 'Core' && p.nivel !== 'Head'; }
@@ -1761,6 +1773,17 @@ document.addEventListener('change', function (ev) {
   if (a === 'ordem-equipe') { S.ordemEquipe = el.value; render(); }
   if (a === 'ordem-pessoas') { S.ordemPessoas = el.value; render(); }
   if (a === 'perfil-acesso') { var box = el.closest('form').querySelector('.escopo'); if (box) box.hidden = el.value !== 'lider'; }
+  if (a === 'papel-onde') {
+    var nv = el.closest('.papel').querySelector('[data-p=nivel]'), atual = nv.value;
+    var niveis = soVoluntario(el.value) ? ['Voluntário'] : ((S.r && S.r.niveis) || NIVEIS_PADRAO);
+    nv.innerHTML = '<option value="">Responsabilidade</option>' + opts(niveis.map(function (n) { return [n, NIVEL_NOME[n] || n]; }), soVoluntario(el.value) ? 'Voluntário' : atual);
+  }
+  if (a === 'min-teen') {
+    var pm = C().porId[el.getAttribute('data-id')], marc = [];
+    el.closest('.min-teen').querySelectorAll('input[data-acao=min-teen]:checked').forEach(function (x) { marc.push(x.value); });
+    api('salvarPessoa', { id: pm.id, nome: pm.nome, zfam: pm.zfam, ministerios: marc.join(', ') }).then(function (r) { aplicar(r); toast('Ministérios atualizados'); })
+      .catch(function (e) { render(); falha(e); });
+  }
   if (a === 'papel-onde' || a === 'papel-nivel') {
     var l = el.closest('.papel');
     l.querySelector('[data-p=zfam]').hidden = !pedeLiderZfam({ onde: l.querySelector('[data-p=onde]').value, nivel: l.querySelector('[data-p=nivel]').value });
