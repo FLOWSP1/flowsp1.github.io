@@ -984,18 +984,44 @@ function linhaAdulto(c, x) {
     (x.f.lst.length > 6 ? tag('+' + (x.f.lst.length - 6), 'line') : '') + (x.acesso ? tag('acesso ao painel', 'ok') : '') + '</div>' +
     '<div class="side-r">' + (e.telefone ? '<a class="tel" href="' + wa(e.telefone) + '" target="_blank" rel="noopener" data-stop="1">WhatsApp</a>' : '') + '</div></div>';
 }
+var HEAD_NOME = { MM: 'AE Multimídia', OP: 'AE Operações', RH: 'AE RH' };
+/** As chaves de filtro de um lugar: todo ZFAM vira "ZFAM"; uma área vale pra ela e pro Head dela (Recepção → AE Operações). */
+function chavesLugar(c, lugar) {
+  if (/^ZFAMs?\b/.test(lugar)) return ['m:ZFAM'];
+  var a = c.areas.filter(function (x) { return x.nome === lugar; })[0];
+  if (a) return ['a:' + a.id, 'm:' + (HEAD_NOME[a.head] || 'Áreas Executivas')];
+  return ['m:' + lugar];
+}
+/** O filtro de lugares: ministérios (ZFAM junto) e Áreas Executivas com as áreas embaixo de cada Head. Conta pessoas, não papéis. */
+function filtroLugares(c, info, filtro) {
+  var n = {}, AE = ['AE Operações', 'AE Multimídia', 'AE RH', 'Áreas Executivas'];
+  info.forEach(function (x) {
+    var ks = {};
+    x.f.lst.forEach(function (f) { chavesLugar(c, f.lugar).forEach(function (k) { ks[k] = 1; }); });
+    Object.keys(ks).forEach(function (k) { n[k] = (n[k] || 0) + 1; });
+  });
+  var op = function (k, t) { return '<option value="' + esc(k) + '"' + (k === filtro ? ' selected' : '') + '>' + esc(t) + ' (' + n[k] + ')</option>'; };
+  var mins = Object.keys(n).filter(function (k) { return k.indexOf('m:') === 0 && AE.indexOf(k.slice(2)) < 0; })
+    .sort(function (a, b) { return (b === 'm:ZFAM') - (a === 'm:ZFAM') || n[b] - n[a] || a.localeCompare(b); });
+  var ae = AE.filter(function (h) { return n['m:' + h]; }).map(function (h) {
+    var areas = c.areas.filter(function (a) { return (HEAD_NOME[a.head] || 'Áreas Executivas') === h && n['a:' + a.id]; });
+    return op('m:' + h, h) + areas.map(function (a) { return op('a:' + a.id, '    ' + a.nome); }).join('');
+  }).join('');
+  return '<option value="">Todos os lugares</option><option value="__lid"' + (filtro === '__lid' ? ' selected' : '') + '>Com liderança</option>' +
+    '<option value="__acesso"' + (filtro === '__acesso' ? ' selected' : '') + '>Com acesso ao painel</option>' +
+    (mins.length ? '<optgroup label="Ministérios">' + mins.map(function (k) { return op(k, k.slice(2)); }).join('') + '</optgroup>' : '') +
+    (ae ? '<optgroup label="Áreas Executivas">' + ae + '</optgroup>' : '');
+}
 function crewPessoas(c, info) {
-  var mins = {};
-  info.forEach(function (x) { x.f.lst.forEach(function (f) { mins[f.lugar] = (mins[f.lugar] || 0) + 1; }); });
   var filtro = S.filtroEquipe, q = norm(S.buscaEquipe).join(' ');
+  if (filtro && !/^(__lid|__acesso|m:|a:)/.test(filtro)) filtro = S.filtroEquipe = '';   // filtro do formato antigo
   var lst = info.filter(function (x) {
     if (q && norm(x.e.nome).join(' ').indexOf(q) < 0) return false;
     if (!filtro) return true;
     if (filtro === '__lid') return x.f.lst.some(function (f) { return f.nivel !== 'Voluntário'; });
     if (filtro === '__acesso') return !!x.acesso;
-    return x.f.lst.some(function (f) { return f.lugar === filtro; });
+    return x.f.lst.some(function (f) { return chavesLugar(c, f.lugar).indexOf(filtro) >= 0; });
   });
-  var lugares = Object.keys(mins).sort(function (a, b) { return mins[b] - mins[a]; });
   var h = '<div class="kpis" style="margin-bottom:16px">' + kpi('Adultos servindo', info.length, '', 'Tally + cadastro do site') +
     kpi('Com liderança', info.filter(function (x) { return x.f.lst.some(function (f) { return f.nivel !== 'Voluntário'; }); }).length, '', 'Core, Head, líder ou auxiliar') +
     kpi('Sobrecarregados', info.filter(function (x) { return x.f.nivel === 'alta'; }).length, '', 'carga ' + (S.r.cargaAlta || 5) + ' ou mais', { acao: 'crew', v: 'carga', cls: 'alerta' }) +
@@ -1018,7 +1044,7 @@ function crewPessoas(c, info) {
       }).join('') + '</div>';
   }
   h += '<div class="filtros"><input type="search" data-acao="busca-equipe" placeholder="Buscar adulto" value="' + esc(S.buscaEquipe) + '" aria-label="Buscar adulto">' +
-    '<select data-acao="filtro-equipe" aria-label="Filtrar">' + opts([['__lid', 'Com liderança'], ['__acesso', 'Com acesso ao painel']].concat(lugares.map(function (l) { return [l, l + ' (' + mins[l] + ')']; })), filtro, 'Todos os lugares') + '</select>' +
+    '<select data-acao="filtro-equipe" aria-label="Filtrar">' + filtroLugares(c, info, filtro) + '</select>' +
     '<select data-acao="ordem-equipe" aria-label="Ordenar">' + opts([['az', 'Ordem: A → Z'], ['za', 'Ordem: Z → A'], ['mais', 'Mais carga primeiro'], ['menos', 'Menos carga primeiro'], ['lugares', 'Mais lugares onde serve']], S.ordemEquipe || 'az') + '</select>' +
     '<button class="btn" data-acao="adulto-novo">+ adulto</button></div>';
   var ORD = { az: function (a, b) { return a.e.nome.localeCompare(b.e.nome); }, za: function (a, b) { return b.e.nome.localeCompare(a.e.nome); },
