@@ -229,7 +229,7 @@ function escopoDe(a) {
   return o;
 }
 function escopoTexto(c, areas, zfams) {
-  return areas.map(function (id) { return nomeArea(c, id); }).concat(zfams.map(function (z) { return 'ZFAM ' + z; })).join(' · ');
+  return areas.map(function (id) { return nomeArea(c, id); }).concat(zfams.map(function (z) { return z === '*' ? 'todos os ZFAMs (coordenação)' : 'ZFAM ' + z; })).join(' · ');
 }
 
 /* ---------- moldura ---------- */
@@ -241,7 +241,7 @@ function tabsDoPerfil() {
       t.push(['areas', u.areas.length > 1 ? 'Minhas áreas' : 'Minha área']);
       if (u.areas.some(function (id) { return !soCrew(id); })) t.push(['trainees', 'Trainees']);
     }
-    if (u.zfams.length) t.push(['zfams', u.zfams.length > 1 ? 'Meus ZFAMs' : 'Meu ZFAM']);
+    if (u.zfams.length) t.push(['zfams', u.coordZfam ? 'ZFAMs' : u.zfams.length > 1 ? 'Meus ZFAMs' : 'Meu ZFAM']);
     return t;
   }
   var pend = (S.r.dados.cadastros || []).filter(function (x) { return x.status === 'Pendente'; }).length;
@@ -906,7 +906,7 @@ function lerPapeis(json) {
     return { onde: onde, nivel: nivel, zfam: p.zfam || '', texto: p.texto || '' };
   }).filter(function (p) { return p.onde && p.nivel; });
 }
-function lugarDe(c, p) { return p.onde === 'zfam' ? 'ZFAM ' + p.zfam : p.onde.indexOf('min:') === 0 ? p.onde.slice(4) : nomeArea(c, p.onde); }
+function lugarDe(c, p) { return p.onde === 'zfam' ? (pedeLiderZfam(p) || p.zfam ? 'ZFAM ' + p.zfam : 'ZFAMs') : p.onde.indexOf('min:') === 0 ? p.onde.slice(4) : nomeArea(c, p.onde); }
 /** O que a pessoa faz em cada lugar: o que ela declarou + o que as planilhas dizem (Core, Heads, líderes de área e de ZFAM)
  *  + as áreas e ministérios marcados. Em cada lugar vale a maior responsabilidade. A carga é a soma dos pesos. */
 function funcoesDe(c, e, todos) {
@@ -1039,12 +1039,13 @@ function crewCarga(c, info) {
   return leg + '<div class="grid-2">' + col('Mais sobrecarregados', 'carga ' + (S.r.cargaAlta || 5) + ' ou mais · ' + alta.length, alta, 'Ninguém sobrecarregado.') +
     col('Menos sobrecarregados', 'carga até ' + (S.r.cargaLeve || 2) + ' · ' + leve.length + ' · podem assumir mais', leve, 'Ninguém com pouca carga.') + '</div>';
 }
-function descPapel(c, p) { return p.nivel + ' · ' + lugarDe(c, p); }
+function descPapel(c, p) { return nomeNivel(p) + ' · ' + lugarDe(c, p); }
 function conferir(c, x) {
   var ok = [], nao = [];
   lerPapeis(x.papeis).forEach(function (p) {
     var nomes = null;
     if (p.nivel === 'Voluntário') return;
+    if (p.onde === 'zfam' && !pedeLiderZfam(p)) return;      // Core e Coordenador de ZFAM não estão nas planilhas: a gestão confere
     if (p.onde === 'zfam') { var z = (c.d.zfams || []).filter(function (q) { return q.lider === p.zfam; })[0]; nomes = z ? [z.lider, z.auxiliar] : []; }
     else if (c.areaId[p.onde]) { var a = c.areaId[p.onde]; nomes = String(a.lideres || '').split(/,| e /).concat([a.auxiliar]); }
     else if (p.nivel === 'Core' || p.nivel === 'Head') {
@@ -1291,13 +1292,21 @@ function linhaPapel(F, p) {
     '<optgroup label="Flow">' + opts(outros, p.onde) + '</optgroup>' +
     '<optgroup label="Áreas Executivas">' + opts(F.areas.map(function (a) { return [a.id, a.nome]; }), p.onde) + '</optgroup>' +
     '<optgroup label="ZFAM">' + opts([['zfam', 'ZFAM']], p.onde) + '</optgroup></select>' +
-    '<select data-p="nivel" aria-label="Responsabilidade"><option value="">Responsabilidade</option>' + opts(F.niveis || ['Core', 'Head', 'Líder', 'Auxiliar', 'Voluntário'], p.nivel) + '</select>' +
+    '<select data-p="nivel" data-acao="papel-nivel" aria-label="Responsabilidade"><option value="">Responsabilidade</option>' +
+      opts((F.niveis || NIVEIS_PADRAO).map(function (n) { return [n, NIVEL_NOME[n] || n]; }), p.nivel) + '</select>' +
     '<button type="button" class="btn sm" data-acao="papel-tirar" aria-label="Tirar esta linha">×</button>' +
-    '<select data-p="zfam" class="zf"' + (p.onde === 'zfam' ? '' : ' hidden') + ' aria-label="Qual ZFAM"><option value="">Qual ZFAM? (nome do líder)</option>' + opts(F.zfams, p.zfam) + '</select>' +
+    '<select data-p="zfam" class="zf"' + (pedeLiderZfam(p) ? '' : ' hidden') + ' aria-label="Qual ZFAM"><option value="">Qual ZFAM? (nome do líder)</option>' + opts(F.zfams, p.zfam) + '</select>' +
     '<input type="text" data-p="texto" class="tx" placeholder="O que você faz lá? (opcional)" value="' + esc(p.texto) + '"></div>';
 }
+var NIVEIS_PADRAO = ['Core', 'Head', 'Líder', 'Auxiliar', 'Voluntário'];
+var NIVEL_NOME = { 'Head': 'Head / Coordenador' };
+/** Só líder, auxiliar e voluntário de ZFAM dizem qual ZFAM. Core e Coordenador de ZFAM cuidam de vários, sem um líder específico. */
+function pedeLiderZfam(p) { return p.onde === 'zfam' && p.nivel !== 'Core' && p.nivel !== 'Head'; }
+/** "Coordenador" no ZFAM, "Head" nos outros lugares (é o mesmo nível, peso 3). */
+function nomeNivel(p) { return p.nivel === 'Head' ? (p.onde === 'zfam' ? 'Coordenador' : 'Head') : p.nivel; }
 function ajudaNiveis() {
-  return '<div class="niveis-ajuda"><b>Core</b><span>cuida do ministério inteiro (ex.: Core do Flow, Core de Comunicação)</span><b>Head</b><span>cuida de um grupo de áreas (ex.: Head de Multimídia)</span>' +
+  return '<div class="niveis-ajuda"><b>Core</b><span>cuida do ministério inteiro (ex.: Core do Flow, Core de Comunicação, Core ZFAM)</span>' +
+    '<b>Head / Coordenador</b><span>Head cuida de um grupo de áreas (ex.: Head de Multimídia). Coordenador cuida de vários ZFAMs, acima dos líderes. Os dois não escolhem um ZFAM</span>' +
     '<b>Líder</b><span>lidera uma área ou um ZFAM</span><b>Auxiliar</b><span>ajuda o líder da área ou do ZFAM</span><b>Voluntário</b><span>serve na escala</span></div>';
 }
 function lerPapeisDe(raiz) {
@@ -1309,8 +1318,8 @@ function lerPapeisDe(raiz) {
 function validarPapeis(ps) {
   if (!ps.length) return 'Diga onde você serve (pelo menos um lugar).';
   for (var k = 0; k < ps.length; k++) {
-    if (!ps[k].nivel) return 'Em cada lugar, escolha a responsabilidade (Core, Head, Líder, Auxiliar ou Voluntário).';
-    if (ps[k].onde === 'zfam' && !ps[k].zfam) return 'Escolha qual ZFAM (o nome do líder).';
+    if (!ps[k].nivel) return 'Em cada lugar, escolha a responsabilidade (Core, Head / Coordenador, Líder, Auxiliar ou Voluntário).';
+    if (pedeLiderZfam(ps[k]) && !ps[k].zfam) return 'Escolha qual ZFAM (o nome do líder). Core e Coordenador de ZFAM não precisam.';
   }
   return '';
 }
@@ -1373,12 +1382,13 @@ function mPedido(c, id) {
 }
 function camposAcesso(c, perfil, escopo) {
   var es = lista(escopo), core = S.r.usuario.perfil === 'core';
-  var perfis = [['lider', 'Liderança (vê só o que estiver marcado)'], ['head', 'Head (vê tudo)']].concat(core || perfil === 'core' ? [['core', 'Core (vê tudo)']] : []);
+  var perfis = [['lider', 'Liderança (vê só o que estiver marcado; Coordenador de ZFAM = "Todos os ZFAMs")'], ['head', 'Head (vê tudo)']].concat(core || perfil === 'core' ? [['core', 'Core (vê tudo)']] : []);
   var marca = function (v) { return es.indexOf(v) >= 0 ? ' checked' : ''; };
   return '<div class="form"><label class="field full">Perfil<select name="perfil" data-acao="perfil-acesso">' + opts(perfis, perfil) + '</select></label></div>' +
     '<div class="escopo" style="margin-top:12px;display:flex;flex-direction:column;gap:12px"' + (perfil === 'lider' ? '' : ' hidden') + '>' +
     '<div class="field">Áreas<div class="checks box">' + c.areas.map(function (a) { return '<label><input type="checkbox" name="escopo" value="area:' + esc(a.id) + '"' + marca('area:' + a.id) + '> ' + esc(a.nome) + '</label>'; }).join('') + '</div></div>' +
-    '<div class="field">ZFAMs<div class="checks box">' + (c.d.zfams || []).map(function (z) { return '<label><input type="checkbox" name="escopo" value="zfam:' + esc(z.lider) + '"' + marca('zfam:' + z.lider) + '> ' + esc(z.lider) + '</label>'; }).join('') + '</div></div></div>';
+    '<div class="field">ZFAMs<div class="checks box"><label><b><input type="checkbox" name="escopo" value="zfam:*"' + marca('zfam:*') + '> Todos os ZFAMs (Coordenador ou Core de ZFAM)</b></label>' +
+      (c.d.zfams || []).map(function (z) { return '<label><input type="checkbox" name="escopo" value="zfam:' + esc(z.lider) + '"' + marca('zfam:' + z.lider) + '> ' + esc(z.lider) + '</label>'; }).join('') + '</div></div></div>';
 }
 function mAcesso(c, cod) {
   var a = cod ? (c.d.acessos || []).filter(function (x) { return x.codigo === cod; })[0] : (S.prefAcesso || { nome: '', email: '', telefone: '', perfil: 'lider', escopo: '' });
@@ -1725,7 +1735,10 @@ document.addEventListener('change', function (ev) {
   if (a === 'ordem-equipe') { S.ordemEquipe = el.value; render(); }
   if (a === 'ordem-pessoas') { S.ordemPessoas = el.value; render(); }
   if (a === 'perfil-acesso') { var box = el.closest('form').querySelector('.escopo'); if (box) box.hidden = el.value !== 'lider'; }
-  if (a === 'papel-onde') { var l = el.closest('.papel'); l.querySelector('[data-p=zfam]').hidden = el.value !== 'zfam'; }
+  if (a === 'papel-onde' || a === 'papel-nivel') {
+    var l = el.closest('.papel');
+    l.querySelector('[data-p=zfam]').hidden = !pedeLiderZfam({ onde: l.querySelector('[data-p=onde]').value, nivel: l.querySelector('[data-p=nivel]').value });
+  }
   if (el.hasAttribute('data-outro')) {
     var inp = el.parentNode.querySelector('[name="' + el.name + '__outro"]');
     if (inp) { inp.hidden = inp.disabled = el.value !== '__outro'; if (!inp.hidden) inp.focus(); }
